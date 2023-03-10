@@ -9,6 +9,7 @@ from libcpp cimport bool as bool_t
 from libcpp.string cimport string
 from libcpp.set cimport set
 from libcpp.unordered_map cimport unordered_map
+from libcpp cimport int 
 
 from .base cimport _Algorithm, Algorithm
 from .dynamics cimport _GraphEvent
@@ -1405,11 +1406,11 @@ cdef class DynAPSP(APSP):
 cdef extern from "<networkit/distance/BFS.hpp>":
 
 	cdef cppclass _BFS "NetworKit::BFS"(_SSSP):
-		_BFS(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target) except +
+		_BFS(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target, int _K) except +
 
 cdef class BFS(SSSP):
 	""" 
-	BFS(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None)
+	BFS(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None, _K=3)
 	
 	Simple breadth-first search on a Graph from a given source.
 
@@ -1425,11 +1426,12 @@ cdef class BFS(SSSP):
 		Controls whether to store nodes sorted by distance.
 	target: int or None, optional
 		Terminate search when the target has been reached. In default-mode, this target is set to None.
+        _K: k distance
 	"""
 
-	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, target=none):
+	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, target=none, _K=3):
 		self._G = G
-		self._this = new _BFS(G._this, source, storePaths, storeNodesSortedByDistance, target)
+		self._this = new _BFS(G._this, source, storePaths, storeNodesSortedByDistance, target, _K)
 
 cdef extern from "<networkit/distance/Dijkstra.hpp>":
 

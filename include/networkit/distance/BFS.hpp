@@ -18,7 +18,7 @@ namespace NetworKit {
  * source node.
  */
 class BFS final : public SSSP {
-
+	int __k_dist;
 public:
     /**
      * Constructs the BFS class for @a G and source node @a source.
@@ -32,7 +32,7 @@ public:
      * @param target The target node.
      */
     BFS(const Graph &G, node source, bool storePaths = true,
-        bool storeNodesSortedByDistance = false, node target = none);
+        bool storeNodesSortedByDistance = false, node target = none, int _K = 3);
 
     /**
      * Breadth-first search from @a source.

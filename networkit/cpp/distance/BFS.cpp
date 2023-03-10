@@ -13,8 +13,8 @@
 namespace NetworKit {
 
 BFS::BFS(const Graph &G, node source, bool storePaths,
-         bool storeNodesSortedByDistance, node target)
-    : SSSP(G, source, storePaths, storeNodesSortedByDistance, target) {}
+         bool storeNodesSortedByDistance, node target, int _K)
+	: SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {}
 
 void BFS::run() {
     count z = G->upperNodeIdBound();
@@ -59,8 +59,9 @@ void BFS::run() {
         // insert untouched neighbors into queue
         G->forNeighborsOf(u, [&](node v) {
             if (distances[v] == infDist) {
-                q.push(v);
                 distances[v] = distances[u] + 1.;
+		if (distances[v] <= __k_dist)
+			q.push(v);
                 sumDist += distances[v];
                 ++reachedNodes;
                 if (storePaths) {

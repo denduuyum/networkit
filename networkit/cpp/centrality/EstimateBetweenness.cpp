@@ -19,8 +19,8 @@
 namespace NetworKit {
 
 EstimateBetweenness::EstimateBetweenness(const Graph &G, count nSamples, bool normalized,
-                                         bool parallel_flag)
-    : Centrality(G, normalized), nSamples(nSamples), parallel_flag(parallel_flag) {}
+                                         bool parallel_flag, int _K)
+	: Centrality(G, normalized), nSamples(nSamples), parallel_flag(parallel_flag), __k_dist(_K) {}
 
 void EstimateBetweenness::run() {
     hasRun = false;
@@ -47,7 +47,7 @@ void EstimateBetweenness::run() {
         if (G.isWeighted()) {
             sssp = std::make_unique<Dijkstra>(G, s, true, true);
         } else {
-            sssp = std::make_unique<BFS>(G, s, true, true);
+		sssp = std::make_unique<BFS>(G, s, true, true, __k_dist);
         }
         if (!handler.isRunning())
             return;
