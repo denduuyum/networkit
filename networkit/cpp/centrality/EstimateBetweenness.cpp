@@ -47,7 +47,7 @@ void EstimateBetweenness::run() {
         if (G.isWeighted()) {
             sssp = std::make_unique<Dijkstra>(G, s, true, true);
         } else {
-		sssp = std::make_unique<BFS>(G, s, true, true, __k_dist);
+		    sssp = std::make_unique<BFS>(G, s, true, true, none, __k_dist);
         }
         if (!handler.isRunning())
             return;

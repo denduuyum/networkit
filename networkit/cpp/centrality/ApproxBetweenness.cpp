@@ -50,7 +50,7 @@ void ApproxBetweenness::run() {
 #pragma omp parallel
     {
         auto ssspPtr = G.isWeighted() ? std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, false))
-		: std::unique_ptr<SSSP>(new BFS(G, 0, true, false, __k_dist));
+		: std::unique_ptr<SSSP>(new BFS(G, 0, true, false, none, __k_dist));
 
 #pragma omp for
         for (omp_index i = 1; i <= static_cast<omp_index>(r); i++) {
