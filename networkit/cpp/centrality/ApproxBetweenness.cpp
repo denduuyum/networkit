@@ -23,8 +23,8 @@
 namespace NetworKit {
 
 ApproxBetweenness::ApproxBetweenness(const Graph &G, double epsilon, double delta,
-                                     double universalConstant)
-    : Centrality(G, true), epsilon(epsilon), delta(delta), universalConstant(universalConstant) {}
+                                     double universalConstant, int _K)
+	: Centrality(G, true), epsilon(epsilon), delta(delta), universalConstant(universalConstant), __k_dist(_K) {}
 
 void ApproxBetweenness::run() {
     Aux::SignalHandler handler;
@@ -50,7 +50,7 @@ void ApproxBetweenness::run() {
 #pragma omp parallel
     {
         auto ssspPtr = G.isWeighted() ? std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, false))
-                                      : std::unique_ptr<SSSP>(new BFS(G, 0, true, false));
+		: std::unique_ptr<SSSP>(new BFS(G, 0, true, false, __k_dist));
 
 #pragma omp for
         for (omp_index i = 1; i <= static_cast<omp_index>(r); i++) {
