@@ -129,12 +129,12 @@ cdef class Centrality(Algorithm):
 cdef extern from "<networkit/centrality/Betweenness.hpp>":
 
 	cdef cppclass _Betweenness "NetworKit::Betweenness" (_Centrality):
-		_Betweenness(_Graph, bool_t, bool_t) except +
+		_Betweenness(_Graph, bool_t, bool_t, int) except +
 		vector[double] edgeScores() except +
 
 cdef class Betweenness(Centrality):
 	"""
-	Betweenness(G, normalized=False, computeEdgeCentrality=False)
+	Betweenness(G, normalized=False, computeEdgeCentrality=False, _K=2147483647)
 
 	Constructs the Betweenness class for the given Graph `G`. If the betweenness scores should be normalized,
 	then set `normalized` to True. The run() method takes O(nm) time, where n is the number
@@ -150,9 +150,9 @@ cdef class Betweenness(Centrality):
 		Set this to true if edge betweenness scores should be computed as well. Default: False
 	"""
 
-	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False):
+	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False, _K=2147483647):
 		self._G = G
-		self._this = new _Betweenness(G._this, normalized, computeEdgeCentrality)
+		self._this = new _Betweenness(G._this, normalized, computeEdgeCentrality, _K)
 
 
 	def edgeScores(self):
@@ -177,7 +177,7 @@ cdef extern from "<networkit/centrality/ApproxBetweenness.hpp>":
 
 cdef class ApproxBetweenness(Centrality):
 	"""
- 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=3)
+ 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=2147483647)
 
 	Approximation of betweenness centrality according to algorithm described in Matteo Riondato 
 	and Evgenios M. Kornaropoulos: Fast Approximation of Betweenness Centrality through Sampling
@@ -218,7 +218,7 @@ cdef extern from "<networkit/centrality/EstimateBetweenness.hpp>":
 
 cdef class EstimateBetweenness(Centrality):
 	""" 
-	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K = 3)
+	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K = 2147483647)
 	
 	Estimation of betweenness centrality according to algorithm described in
 	Sanders, Geisberger, Schultes: Better Approximation of Betweenness Centrality
@@ -241,7 +241,7 @@ cdef class EstimateBetweenness(Centrality):
 		Run in parallel with additional memory cost z + 3z * t
 	"""
 
-	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K = 3):
+	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K = 2147483647):
 		self._G = G
 		self._this = new _EstimateBetweenness(G._this, nSamples, normalized, parallel, _K)
 
@@ -957,6 +957,7 @@ cdef extern from "<networkit/centrality/TopCloseness.hpp>":
 		count operations() except +
 		vector[node] topkNodesList(bool_t) except +
 		vector[edgeweight] topkScoresList(bool_t) except +
+		void restrictTopKComputationToNodes(const vector[node] &nodeList) except +
 
 
 cdef class TopCloseness(Algorithm):
@@ -1037,17 +1038,33 @@ cdef class TopCloseness(Algorithm):
 		"""
 		return (<_TopCloseness*>(self._this)).topkScoresList(includeTrail)
 
+	def restrictTopKComputationToNodes(self, nodeList):
+		"""
+		restrictTopKComputationToNodes(nodeList)
+
+		Restricts the top-k closeness computation to a subset of nodes.
+		If the given list is empty, all nodes in the graph will be considered.
+		Note: Actual existence of included nodes in the graph is not checked.
+
+		Parameters
+		----------
+		nodeList : list()
+			List containing a subset of nodes from the graph.
+		"""
+		return (<_TopCloseness*>(self._this)).restrictTopKComputationToNodes(nodeList)
+
 cdef extern from "<networkit/centrality/TopHarmonicCloseness.hpp>":
 
 	cdef cppclass _TopHarmonicCloseness "NetworKit::TopHarmonicCloseness"(_Algorithm):
 		_TopHarmonicCloseness(_Graph G, count, bool_t) except +
 		vector[node] topkNodesList(bool_t) except +
 		vector[edgeweight] topkScoresList(bool_t) except +
+		void restrictTopKComputationToNodes(const vector[node] &nodeList) except +
 
 
 cdef class TopHarmonicCloseness(Algorithm):
 	""" 
-	TopHarmonicCloseness(G, k=1, useNBbound=True)
+	TopHarmonicCloseness(G, k=1, useNBbound=False)
 
 	Finds the top k nodes with highest harmonic closeness centrality faster
 	than computing it for all nodes. The implementation is based on "Computing
@@ -1073,7 +1090,7 @@ cdef class TopHarmonicCloseness(Algorithm):
 	useNBbound : bool, optional
 		If True, the NBbound is re-computed at each iteration. If False, NBcut is used. The worst case 
 		running time of the algorithm is :math:`O(nm)`, where n is the number of nodes and m is the number of edges.
-		However, for most networks the empirical running time is :math:`O(m)`. Default: True
+		However, for most networks the empirical running time is :math:`O(m)`. Default: False
 	"""
 	cdef Graph _G
 
@@ -1124,6 +1141,23 @@ cdef class TopHarmonicCloseness(Algorithm):
 			The k highest closeness harmonic scores.
 		"""
 		return (<_TopHarmonicCloseness*>(self._this)).topkScoresList(includeTrail)
+
+	def restrictTopKComputationToNodes(self, nodeList):
+		"""
+		topkScoresList(nodeList)
+
+		Restricts the top-k closeness computation to a subset of nodes.
+		If the given list is empty, all nodes in the graph will be considered.
+		Note: Actual existence of included nodes in the graph is not checked.
+
+		Parameters
+		----------
+		nodeList : list()
+			List containing a subset of nodes from the graph.
+		"""
+		return (<_TopHarmonicCloseness*>(self._this)).restrictTopKComputationToNodes(nodeList)
+
+
 
 cdef extern from "<networkit/centrality/DynTopHarmonicCloseness.hpp>":
 

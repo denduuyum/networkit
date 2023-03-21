@@ -34,7 +34,7 @@ public:
      * @param	parallel_flag	if true, run in parallel with additional memory cost z + 3z * t
      */
     EstimateBetweenness(const Graph &G, count nSamples, bool normalized = false,
-                        bool parallel_flag = false, int _K = 3);
+                        bool parallel_flag = false, int _K=2147483647);
 
     /**
      * Computes betweenness estimation on the graph passed in constructor.

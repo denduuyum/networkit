@@ -16,8 +16,8 @@
 
 namespace NetworKit {
 
-Betweenness::Betweenness(const Graph &G, bool normalized, bool computeEdgeCentrality)
-    : Centrality(G, normalized, computeEdgeCentrality) {}
+	Betweenness::Betweenness(const Graph &G, bool normalized, bool computeEdgeCentrality, int _K)
+		: Centrality(G, normalized, computeEdgeCentrality), __k_dist(_K) {}
 
 void Betweenness::run() {
     Aux::SignalHandler handler;
@@ -38,8 +38,10 @@ void Betweenness::run() {
         omp_index i = omp_get_thread_num();
         if (G.isWeighted())
             sssps[i] = std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, true));
-        else
-            sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true));
+        else {
+		sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true, none, __k_dist));
+		INFO(std::to_string(__k_dist));
+	}
     }
 
     auto computeDependencies = [&](node s) -> void {
