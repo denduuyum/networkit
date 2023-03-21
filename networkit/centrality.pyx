@@ -129,12 +129,12 @@ cdef class Centrality(Algorithm):
 cdef extern from "<networkit/centrality/Betweenness.hpp>":
 
 	cdef cppclass _Betweenness "NetworKit::Betweenness" (_Centrality):
-		_Betweenness(_Graph, bool_t, bool_t) except +
+		_Betweenness(_Graph, bool_t, bool_t, int) except +
 		vector[double] edgeScores() except +
 
 cdef class Betweenness(Centrality):
 	"""
-	Betweenness(G, normalized=False, computeEdgeCentrality=False)
+	Betweenness(G, normalized=False, computeEdgeCentrality=False, _K=2147483647)
 
 	Constructs the Betweenness class for the given Graph `G`. If the betweenness scores should be normalized,
 	then set `normalized` to True. The run() method takes O(nm) time, where n is the number
@@ -150,9 +150,9 @@ cdef class Betweenness(Centrality):
 		Set this to true if edge betweenness scores should be computed as well. Default: False
 	"""
 
-	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False):
+	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False, _K=2147483647):
 		self._G = G
-		self._this = new _Betweenness(G._this, normalized, computeEdgeCentrality)
+		self._this = new _Betweenness(G._this, normalized, computeEdgeCentrality, _K)
 
 
 	def edgeScores(self):
@@ -177,7 +177,7 @@ cdef extern from "<networkit/centrality/ApproxBetweenness.hpp>":
 
 cdef class ApproxBetweenness(Centrality):
 	"""
- 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=3)
+ 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=2147483647)
 
 	Approximation of betweenness centrality according to algorithm described in Matteo Riondato 
 	and Evgenios M. Kornaropoulos: Fast Approximation of Betweenness Centrality through Sampling
@@ -218,7 +218,7 @@ cdef extern from "<networkit/centrality/EstimateBetweenness.hpp>":
 
 cdef class EstimateBetweenness(Centrality):
 	""" 
-	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K = 3)
+	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K = 2147483647)
 	
 	Estimation of betweenness centrality according to algorithm described in
 	Sanders, Geisberger, Schultes: Better Approximation of Betweenness Centrality
@@ -241,7 +241,7 @@ cdef class EstimateBetweenness(Centrality):
 		Run in parallel with additional memory cost z + 3z * t
 	"""
 
-	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K = 3):
+	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K = 2147483647):
 		self._G = G
 		self._this = new _EstimateBetweenness(G._this, nSamples, normalized, parallel, _K)
 

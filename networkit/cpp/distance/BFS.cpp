@@ -14,13 +14,17 @@ namespace NetworKit {
 
 BFS::BFS(const Graph &G, node source, bool storePaths,
          bool storeNodesSortedByDistance, node target, int _K)
-	: SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {}
+	: SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {
+	INFO("Const BFS: " + std::to_string(_K));
+}
 
 void BFS::run() {
+
+	INFO("BFS: " + std::to_string(__k_dist));
     count z = G->upperNodeIdBound();
     reachedNodes = 1;
     sumDist = 0.;
-
+    
     const auto infDist = std::numeric_limits<edgeweight>::max();
     std::fill(distances.begin(), distances.end(), infDist);
 

@@ -32,7 +32,7 @@ public:
      * @param target The target node.
      */
     BFS(const Graph &G, node source, bool storePaths = true,
-        bool storeNodesSortedByDistance = false, node target = none, int _K = 3);
+        bool storeNodesSortedByDistance = false, node target = none, int _K = 2147483647);
 
     /**
      * Breadth-first search from @a source.

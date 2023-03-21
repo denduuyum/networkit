@@ -16,6 +16,7 @@ namespace NetworKit {
  * @ingroup centrality
  */
 class Betweenness final : public Centrality {
+	int __k_dist;
 public:
     /**
      * Constructs the Betweenness class for the given Graph @a G. If the betweenness scores should
@@ -28,7 +29,7 @@ public:
      * @param computeEdgeCentrality Set this parameter to <code>true</code> if edge betweenness
      * should be computed as well.
      */
-    Betweenness(const Graph &G, bool normalized = false, bool computeEdgeCentrality = false);
+	Betweenness(const Graph &G, bool normalized = false, bool computeEdgeCentrality = false, int _K=2147483647);
 
     /**
      * Computes betweenness scores on the graph passed in constructor.
