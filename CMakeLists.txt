@@ -144,8 +144,8 @@ find_package(OpenMP)
 if(NOT OpenMP_FOUND)
 	if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
 		# This will find default libomp-installations for homebrew/MacPorts
-		find_library(LIBOMP_PATH NAMES omp PATHS "/usr/local/opt/libomp/lib" "/opt/local/lib/libomp")
-		find_path(LIBOMP_INCLUDE NAMES omp.h PATHS "/usr/local/opt/libomp/include" "/opt/local/include/libomp")
+		find_library(LIBOMP_PATH NAMES omp PATHS "/usr/local/opt/libomp/lib" "/opt/local/lib/libomp" "/opt/homebrew/opt/libomp/lib")
+		find_path(LIBOMP_INCLUDE NAMES omp.h PATHS "/usr/local/opt/libomp/include" "/opt/local/include/libomp" "/opt/homebrew/opt/libomp/include")
 		if(LIBOMP_PATH AND LIBOMP_INCLUDE)
 			set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_INCLUDE}" CACHE STRING "Manually set" FORCE)
 		endif()
@@ -461,7 +461,7 @@ if (NETWORKIT_BUILD_TESTS)
 			set( gtest_force_shared_crt ON CACHE BOOL "Always use msvcrt.dll" FORCE)
 		endif()
 		option(BUILD_GTEST "Builds the googletest subproject" ON)
-		option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
+		option(BUILD_GMOCK "Builds the googlemock subproject" ON)
 		add_subdirectory(extlibs/googletest)
 	else()
 		message(FATAL_ERROR
@@ -475,11 +475,12 @@ if (NETWORKIT_BUILD_TESTS)
 		target_link_libraries(networkit_tests
 			PRIVATE
 				gtest
+				gmock
 				networkit
 				tlx
 				OpenMP::OpenMP_CXX
 		)
-		
+
 		if(WIN32)
 			target_link_libraries(networkit_tests
 				PRIVATE
@@ -487,6 +488,11 @@ if (NETWORKIT_BUILD_TESTS)
 			)
 		endif()
 
+		if(WIN32)
+			set(NETWORKIT_CXX_FLAGS "${NETWORKIT_CXX_FLAGS} /wd4996")
+		else()
+			set(NETWORKIT_CXX_FLAGS "${NETWORKIT_CXX_FLAGS} -Wno-deprecated-declarations")
+		endif()
 		set_target_properties(networkit_tests PROPERTIES
 			CXX_STANDARD ${NETWORKIT_CXX_STANDARD}
 			COMPILE_FLAGS "${NETWORKIT_CXX_FLAGS}"
@@ -515,6 +521,7 @@ if (NETWORKIT_BUILD_TESTS)
 		target_link_libraries(networkit_gtest_main
 				PUBLIC
 					gtest
+					gmock
 				PRIVATE
 					tlx
 					networkit_auxiliary

@@ -37,7 +37,8 @@ Graph::Graph(count n, bool weighted, bool directed, bool edgesIndexed)
       outgoing edges, for undirected graphs outEdges stores the adjacency list of
       undirected edges*/
       outEdges(n), inEdgeWeights(weighted && directed ? n : 0), outEdgeWeights(weighted ? n : 0),
-      inEdgeIds(), outEdgeIds(), nodeAttributeMap(this) {}
+      inEdgeIds(edgesIndexed && directed ? n : 0), outEdgeIds(edgesIndexed ? n : 0),
+      nodeAttributeMap(this) {}
 
 Graph::Graph(std::initializer_list<WeightedEdge> edges) : Graph(0, true) {
     using namespace std;
@@ -54,129 +55,6 @@ Graph::Graph(std::initializer_list<WeightedEdge> edges) : Graph(0, true) {
     for (const auto &edge : edges) {
         addEdge(edge.u, edge.v, edge.weight);
     }
-}
-
-Graph::Graph(const Graph &G, bool weighted, bool directed, bool edgesIndexed)
-    : n(G.n), m(G.m), storedNumberOfSelfLoops(G.storedNumberOfSelfLoops), z(G.z),
-      omega(edgesIndexed ? G.omega : 0), t(G.t), weighted(weighted), directed(directed),
-      edgesIndexed(edgesIndexed), // edges are not indexed by default
-      exists(G.exists),
-
-      // let the following be empty for the start, we fill them later
-      inEdges(0), outEdges(0), inEdgeWeights(0), outEdgeWeights(0), inEdgeIds(0), outEdgeIds(0),
-
-      // empty node attribute map as last member for this graph
-      nodeAttributeMap(this) {
-
-    if (G.isDirected() == directed) {
-        // G.inEdges might be empty (if G is undirected), but
-        // that's fine
-        inEdges = G.inEdges;
-        outEdges = G.outEdges;
-
-        // copy weights if needed
-        if (weighted) {
-            if (G.isWeighted()) {
-                // just copy from G, again either both graphs are directed or both are
-                // undirected
-                inEdgeWeights = G.inEdgeWeights;
-                outEdgeWeights = G.outEdgeWeights;
-            } else {
-                // G has no weights, set defaultEdgeWeight for all edges
-                if (directed) {
-                    inEdgeWeights.resize(z);
-                    for (node u = 0; u < z; u++) {
-                        inEdgeWeights[u] =
-                            std::vector<edgeweight>(G.inEdges[u].size(), defaultEdgeWeight);
-                    }
-                }
-
-                outEdgeWeights.resize(z);
-                for (node u = 0; u < z; u++) {
-                    outEdgeWeights[u] =
-                        std::vector<edgeweight>(outEdges[u].size(), defaultEdgeWeight);
-                }
-            }
-        }
-        if (G.hasEdgeIds() && edgesIndexed) {
-            inEdgeIds = G.inEdgeIds;
-            outEdgeIds = G.outEdgeIds;
-        }
-    } else if (G.isDirected()) {
-        // G is directed, but we want an undirected graph
-        // so we need to combine the out and in stuff for every node
-        outEdges.resize(z);
-        for (node u = 0; u < z; u++) {
-
-            // copy both out and in edges into our new outEdges
-            outEdges[u].reserve(G.outEdges[u].size() + G.inEdges[u].size());
-            outEdges[u].insert(outEdges[u].end(), G.outEdges[u].begin(), G.outEdges[u].end());
-            outEdges[u].insert(outEdges[u].end(), G.inEdges[u].begin(), G.inEdges[u].end());
-        }
-        if (weighted) {
-            if (G.isWeighted()) {
-                // same for weights
-                outEdgeWeights.resize(z);
-                for (node u = 0; u < z; u++) {
-                    outEdgeWeights[u].reserve(G.outEdgeWeights[u].size()
-                                              + G.inEdgeWeights[u].size());
-                    outEdgeWeights[u].insert(outEdgeWeights[u].end(), G.outEdgeWeights[u].begin(),
-                                             G.outEdgeWeights[u].end());
-                    outEdgeWeights[u].insert(outEdgeWeights[u].end(), G.inEdgeWeights[u].begin(),
-                                             G.inEdgeWeights[u].end());
-                }
-            } else {
-                // we are undirected, so no need to write anything into inEdgeWeights
-                outEdgeWeights.resize(z);
-                for (node u = 0; u < z; u++) {
-                    outEdgeWeights[u] =
-                        std::vector<edgeweight>(outEdges[u].size(), defaultEdgeWeight);
-                }
-            }
-        }
-        if (G.hasEdgeIds() && edgesIndexed) {
-            for (node u = 0; u < z; u++) {
-
-                // copy both out and in edges ids into our new outEdgesIds
-                outEdgeIds[u].reserve(G.outEdgeIds[u].size() + G.inEdgeIds[u].size());
-                outEdgeIds[u].insert(outEdgeIds[u].end(), G.outEdgeIds[u].begin(),
-                                     G.outEdgeIds[u].end());
-                outEdgeIds[u].insert(outEdgeIds[u].end(), G.inEdgeIds[u].begin(),
-                                     G.inEdgeIds[u].end());
-            }
-        }
-    } else {
-        // G is not directed, but this copy should be
-        // generally we can can copy G.out stuff into our in stuff
-        inEdges = G.outEdges;
-        outEdges = G.outEdges;
-        if (weighted) {
-            if (G.isWeighted()) {
-                inEdgeWeights = G.outEdgeWeights;
-                outEdgeWeights = G.outEdgeWeights;
-            } else {
-                // initialize both inEdgeWeights and outEdgeWeights with the
-                // defaultEdgeWeight
-                inEdgeWeights.resize(z);
-                for (node u = 0; u < z; u++) {
-                    inEdgeWeights[u] =
-                        std::vector<edgeweight>(inEdges[u].size(), defaultEdgeWeight);
-                }
-                outEdgeWeights.resize(z);
-                for (node u = 0; u < z; u++) {
-                    outEdgeWeights[u] =
-                        std::vector<edgeweight>(outEdges[u].size(), defaultEdgeWeight);
-                }
-            }
-        }
-        if (G.hasEdgeIds() && edgesIndexed) {
-            inEdgeIds = G.outEdgeIds;
-            outEdgeIds = G.outEdgeIds;
-        }
-    }
-
-    if (!G.edgesIndexed && edgesIndexed)
-        indexEdges();
 }
 
 void Graph::preallocateUndirected(node u, size_t size) {
@@ -591,11 +469,15 @@ edgeweight Graph::weightedDegreeIn(node u, bool countSelfLoopsTwice) const {
 
 /** EDGE MODIFIERS **/
 
-void Graph::addEdge(node u, node v, edgeweight ew) {
+bool Graph::addEdge(node u, node v, edgeweight ew, bool checkForMultiEdges) {
     assert(u < z);
     assert(exists[u]);
     assert(v < z);
     assert(exists[v]);
+
+    if (checkForMultiEdges && hasEdge(u, v)) {
+        return false;
+    }
 
     // increase number of edges
     ++m;
@@ -639,12 +521,20 @@ void Graph::addEdge(node u, node v, edgeweight ew) {
     if (u == v) { // count self loop
         ++storedNumberOfSelfLoops;
     }
+
+    return true;
 }
-void Graph::addPartialEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index) {
+bool Graph::addPartialEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index,
+                           bool checkForMultiEdges) {
     assert(u < z);
     assert(exists[u]);
     assert(v < z);
     assert(exists[v]);
+
+    if (checkForMultiEdges
+        && (std::find(outEdges[u].begin(), outEdges[u].end(), v) != outEdges[u].end())) {
+        return false;
+    }
 
     outEdges[u].push_back(v);
 
@@ -655,12 +545,20 @@ void Graph::addPartialEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index
     if (weighted) {
         outEdgeWeights[u].push_back(ew);
     }
+
+    return true;
 }
-void Graph::addPartialOutEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index) {
+bool Graph::addPartialOutEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index,
+                              bool checkForMultiEdges) {
     assert(u < z);
     assert(exists[u]);
     assert(v < z);
     assert(exists[v]);
+
+    if (checkForMultiEdges
+        && (std::find(outEdges[u].begin(), outEdges[u].end(), v) != outEdges[u].end())) {
+        return false;
+    }
 
     outEdges[u].push_back(v);
 
@@ -671,12 +569,20 @@ void Graph::addPartialOutEdge(Unsafe, node u, node v, edgeweight ew, uint64_t in
     if (weighted) {
         outEdgeWeights[u].push_back(ew);
     }
+
+    return true;
 }
-void Graph::addPartialInEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index) {
+bool Graph::addPartialInEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index,
+                             bool checkForMultiEdges) {
     assert(u < z);
     assert(exists[u]);
     assert(v < z);
     assert(exists[v]);
+
+    if (checkForMultiEdges
+        && (std::find(inEdges[u].begin(), inEdges[u].end(), v) != inEdges[u].end())) {
+        return false;
+    }
 
     inEdges[u].push_back(v);
 
@@ -686,6 +592,8 @@ void Graph::addPartialInEdge(Unsafe, node u, node v, edgeweight ew, uint64_t ind
     if (weighted) {
         inEdgeWeights[u].push_back(ew);
     }
+
+    return true;
 }
 
 template <typename T>
