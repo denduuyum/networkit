@@ -19,8 +19,6 @@ namespace NetworKit {
  * through Sampling
  */
 class ApproxBetweenness final : public Centrality {
-	int __k_dist;
-
 public:
     /**
      * The algorithm approximates the betweenness of all vertices so that the scores are
@@ -56,6 +54,7 @@ private:
     const double delta;
     count r; // number of samples taken in last run
     double universalConstant;
+        int __k_dist;
 };
 
 } /* namespace NetworKit */

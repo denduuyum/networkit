@@ -33,17 +33,23 @@ void ApproxBetweenness::run() {
 
     edgeweight vd = 0;
 
-    Diameter diam(G, DiameterAlgo::ESTIMATED_PEDANTIC);
-    diam.run();
-    vd = static_cast<edgeweight>(diam.getDiameter().first);
-
-    if (vd <= 2) {
-        hasRun = true;
-        return;
-    }
 
     INFO("estimated diameter: ", vd);
-    r = ceil((universalConstant / (epsilon * epsilon)) * (floor(log2(vd - 2)) + 1 - log(delta)));
+    if (__k_dist < 2147483647) {
+            r = ceil((universalConstant / (epsilon * epsilon)) * (floor(log2(__k_dist - 1)) + 1 - log(delta)));
+            vd = __k_dist;
+            INFO("running k distance bc: ", __k_dist);
+    } else {
+            Diameter diam(G, DiameterAlgo::ESTIMATED_PEDANTIC);
+            diam.run();
+            vd = static_cast<edgeweight>(diam.getDiameter().first);
+            
+            if (vd <= 2) {
+                    hasRun = true;
+                    return;
+            }
+            r = ceil((universalConstant / (epsilon * epsilon)) * (floor(log2(vd - 2)) + 1 - log(delta)));
+    }
 
     INFO("taking ", r, " path samples");
     handler.assureRunning();

@@ -39,9 +39,8 @@ void Betweenness::run() {
         if (G.isWeighted())
             sssps[i] = std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, true));
         else {
-		sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true, none, __k_dist));
-		INFO(std::to_string(__k_dist));
-	}
+		    sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true, none, __k_dist));
+        }
     }
 
     auto computeDependencies = [&](node s) -> void {

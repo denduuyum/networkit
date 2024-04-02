@@ -11,71 +11,76 @@
 
 namespace NetworKit {
 
-BFS::BFS(const Graph &G, node source, bool storePaths,
-         bool storeNodesSortedByDistance, node target, int _K)
-	: SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {}
+        BFS::BFS(const Graph &G, node source, bool storePaths,
+                 bool storeNodesSortedByDistance, node target, int _K)
+                : SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {}
 
-void BFS::run() {
-    count z = G->upperNodeIdBound();
-    reachedNodes = 1;
-    sumDist = 0.;
+        void BFS::run() {
+                count z = G->upperNodeIdBound();
+                reachedNodes = 1;
+                sumDist = 0.;
     
-    const auto infDist = std::numeric_limits<edgeweight>::max();
-    std::fill(distances.begin(), distances.end(), infDist);
+                const auto infDist = std::numeric_limits<edgeweight>::max();
+                std::fill(distances.begin(), distances.end(), infDist);
 
-    if (distances.size() < z)
-        distances.resize(z, infDist);
+                if (distances.size() < z)
+                        distances.resize(z, infDist);
 
-    if (storePaths) {
-        previous.clear();
-        previous.resize(z);
-        npaths.clear();
-        npaths.resize(z, 0);
-        npaths[source] = 1;
-    }
-
-    if (storeNodesSortedByDistance) {
-        std::vector<node> empty;
-        std::swap(nodesSortedByDistance, empty);
-    }
-
-    std::queue<node> q;
-    q.push(source);
-    distances[source] = 0.;
-
-    bool breakWhenFound = (target != none);
-    while (!q.empty()) {
-        node u = q.front();
-        q.pop();
-
-        if (storeNodesSortedByDistance) {
-            nodesSortedByDistance.push_back(u);
-        }
-        if (breakWhenFound && target == u) {
-            break;
-        }
-
-        // insert untouched neighbors into queue
-        G->forNeighborsOf(u, [&](node v) {
-            if (distances[v] == infDist) {
-                distances[v] = distances[u] + 1.;
-		if (distances[v] <= __k_dist)
-			q.push(v);
-                sumDist += distances[v];
-                ++reachedNodes;
                 if (storePaths) {
-                    previous[v] = {u};
-                    npaths[v] = npaths[u];
+                        previous.clear();
+                        previous.resize(z);
+                        npaths.clear();
+                        npaths.resize(z, 0);
+                        npaths[source] = 1;
                 }
-            } else if (storePaths && (distances[v] == distances[u] + 1.)) {
-                // additional predecessor
-                previous[v].push_back(u);
-                // all the shortest paths to u are also shortest paths to v now
-                npaths[v] += npaths[u];
-            }
-        });
-    }
 
-    hasRun = true;
-}
+                if (storeNodesSortedByDistance) {
+                        std::vector<node> empty;
+                        std::swap(nodesSortedByDistance, empty);
+                }
+
+                std::queue<node> q;
+                q.push(source);
+                distances[source] = 0.;
+
+                if (storeNodesSortedByDistance) {
+                        nodesSortedByDistance.push_back(source);
+                }
+
+                bool breakWhenFound = (target != none);
+                while (!q.empty()) {
+                        node u = q.front();
+                        q.pop();
+
+                        if (breakWhenFound && target == u) {
+                                break;
+                        }
+
+                        // insert untouched neighbors into queue
+                        G->forNeighborsOf(u, [&](node v) {
+                                if (distances[v] == infDist) {
+                                        distances[v] = distances[u] + 1.;
+                                        if (distances[v] < __k_dist)
+                                                q.push(v);
+                                        if (storeNodesSortedByDistance) {
+                                                nodesSortedByDistance.push_back(v);
+                                        }
+                                        
+                                        sumDist += distances[v];
+                                        ++reachedNodes;
+                                        if (storePaths) {
+                                                previous[v] = {u};
+                                                npaths[v] = npaths[u];
+                                        }
+                                } else if (storePaths && (distances[v] == distances[u] + 1.)) {
+                                        // additional predecessor
+                                        previous[v].push_back(u);
+                                        // all the shortest paths to u are also shortest paths to v now
+                                        npaths[v] += npaths[u];
+                                }
+                        });
+                }
+
+                hasRun = true;
+        }
 } // namespace NetworKit
