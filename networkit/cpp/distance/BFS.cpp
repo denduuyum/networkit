@@ -12,8 +12,8 @@
 namespace NetworKit {
 
         BFS::BFS(const Graph &G, node source, bool storePaths,
-                 bool storeNodesSortedByDistance, node target, int _K)
-                : SSSP(G, source, storePaths, storeNodesSortedByDistance, target), __k_dist(_K) {}
+                 bool storeNodesSortedByDistance, node target, edgeweight _K)
+                : SSSP(G, source, storePaths, storeNodesSortedByDistance, target, _K) {}
 
         void BFS::run() {
                 count z = G->upperNodeIdBound();

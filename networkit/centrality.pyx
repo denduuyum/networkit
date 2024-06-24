@@ -6,6 +6,7 @@ from libcpp.vector cimport vector
 from libcpp.utility cimport pair
 from libcpp cimport bool as bool_t
 from libcpp cimport int
+from libcpp.limits cimport numeric_limits
 
 import math
 
@@ -21,7 +22,7 @@ cdef extern from "limits.h":
 cdef extern from "<networkit/centrality/Centrality.hpp>":
 
 	cdef cppclass _Centrality "NetworKit::Centrality"(_Algorithm):
-		_Centrality(_Graph, bool_t, bool_t) except +
+		_Centrality(_Graph, bool_t, bool_t, edgeweight) except +
 		vector[double] scores() except +
 		vector[pair[node, double]] ranking() except +
 		double score(node) except +
@@ -129,12 +130,12 @@ cdef class Centrality(Algorithm):
 cdef extern from "<networkit/centrality/Betweenness.hpp>":
 
 	cdef cppclass _Betweenness "NetworKit::Betweenness" (_Centrality):
-		_Betweenness(_Graph, bool_t, bool_t, int) except +
+		_Betweenness(_Graph, bool_t, bool_t, edgeweight) except +
 		vector[double] edgeScores() except +
 
 cdef class Betweenness(Centrality):
 	"""
-	Betweenness(G, normalized=False, computeEdgeCentrality=False, _K=2147483647)
+	Betweenness(G, normalized=False, computeEdgeCentrality=False, _K=numeric_limits[edgeweight].max())
 
 	Constructs the Betweenness class for the given Graph `G`. If the betweenness scores should be normalized,
 	then set `normalized` to True. The run() method takes O(nm) time, where n is the number
@@ -150,7 +151,7 @@ cdef class Betweenness(Centrality):
 		Set this to true if edge betweenness scores should be computed as well. Default: False
 	"""
 
-	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False, _K=2147483647):
+	def __cinit__(self, Graph G, normalized=False, computeEdgeCentrality=False, _K=numeric_limits[edgeweight].max()):
 		self._G = G
 		self._this = new _Betweenness(G._this, normalized, computeEdgeCentrality, _K)
 
@@ -172,12 +173,12 @@ cdef class Betweenness(Centrality):
 cdef extern from "<networkit/centrality/ApproxBetweenness.hpp>":
 
 	cdef cppclass _ApproxBetweenness "NetworKit::ApproxBetweenness" (_Centrality):
-		_ApproxBetweenness(_Graph, double, double, double, int) except +
+		_ApproxBetweenness(_Graph, double, double, double, edgeweight) except +
 		count numberOfSamples() except +
 
 cdef class ApproxBetweenness(Centrality):
 	"""
- 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=2147483647)
+ 	ApproxBetweenness(G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=numeric_limits[edgeweight].max())
 
 	Approximation of betweenness centrality according to algorithm described in Matteo Riondato 
 	and Evgenios M. Kornaropoulos: Fast Approximation of Betweenness Centrality through Sampling
@@ -203,7 +204,7 @@ cdef class ApproxBetweenness(Centrality):
 		is no guarantee in this case.
 	"""
 
-	def __cinit__(self, Graph G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=2147483647):
+	def __cinit__(self, Graph G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=numeric_limits[edgeweight].max()):
 		self._G = G
 		self._this = new _ApproxBetweenness(G._this, epsilon, delta, universalConstant, _K)
 
@@ -214,11 +215,11 @@ cdef class ApproxBetweenness(Centrality):
 cdef extern from "<networkit/centrality/EstimateBetweenness.hpp>":
 
 	cdef cppclass _EstimateBetweenness"NetworKit::EstimateBetweenness" (_Centrality):
-		_EstimateBetweenness(_Graph, count, bool_t, bool_t, int) except +
+		_EstimateBetweenness(_Graph, count, bool_t, bool_t, edgeweight) except +
 
 cdef class EstimateBetweenness(Centrality):
 	""" 
-	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K = 2147483647)
+	EstimateBetweenness(G, nSamples, normalized=False, parallel=False, _K=numeric_limits[edgeweight].max())
 	
 	Estimation of betweenness centrality according to algorithm described in
 	Sanders, Geisberger, Schultes: Better Approximation of Betweenness Centrality
@@ -241,7 +242,7 @@ cdef class EstimateBetweenness(Centrality):
 		Run in parallel with additional memory cost z + 3z * t
 	"""
 
-	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K = 2147483647):
+	def __cinit__(self, Graph G, nSamples, normalized=False, parallel=False, _K=numeric_limits[edgeweight].max()):
 		self._G = G
 		self._this = new _EstimateBetweenness(G._this, nSamples, normalized, parallel, _K)
 

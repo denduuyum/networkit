@@ -34,7 +34,7 @@ public:
      * @param target The target node.
      */
     Dijkstra(const Graph &G, node source, bool storePaths = true,
-             bool storeNodesSortedByDistance = false, node target = none);
+             bool storeNodesSortedByDistance = false, node target = none, edgeweight _K = std::numeric_limits<edgeweight>::max());
 
     /**
      * Performs the Dijkstra SSSP algorithm on the graph given in the

@@ -11,8 +11,8 @@
 
 namespace NetworKit {
 
-Centrality::Centrality(const Graph &G, bool normalized, bool computeEdgeCentrality)
-    : Algorithm(), G(G), normalized(normalized), computeEdgeCentrality(computeEdgeCentrality) {
+        Centrality::Centrality(const Graph &G, bool normalized, bool computeEdgeCentrality, edgeweight _K)
+                : Algorithm(), G(G), normalized(normalized), computeEdgeCentrality(computeEdgeCentrality), __k_dist(_K) {
     if (computeEdgeCentrality && !G.hasEdgeIds()) {
         throw std::runtime_error("For edge centralities to be computed, edges must "
                                  "be indexed first: call G.indexEdges()");

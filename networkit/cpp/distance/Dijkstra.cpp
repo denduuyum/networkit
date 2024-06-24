@@ -12,8 +12,8 @@
 namespace NetworKit {
 
 Dijkstra::Dijkstra(const Graph &G, node source, bool storePaths, bool storeNodesSortedByDistance,
-                   node target)
-    : SSSP(G, source, storePaths, storeNodesSortedByDistance, target),
+                   node target, edgeweight _K)
+        : SSSP(G, source, storePaths, storeNodesSortedByDistance, target, _K),
       heap(Aux::LessInVector<double>{distances}) {}
 
 void Dijkstra::run() {
@@ -56,6 +56,7 @@ void Dijkstra::run() {
     };
     bool breakWhenFound = (target != none);
     TRACE("traversing graph");
+    INFO("using k distance: ", __k_dist);
     do {
         TRACE("pq size: ", heap.size());
         node u = heap.extract_top();
@@ -65,11 +66,16 @@ void Dijkstra::run() {
         if ((breakWhenFound && target == u) || distances[u] == infDist)
             break;
 
+        if (distances[u] > __k_dist)
+                break;
+
         if (storeNodesSortedByDistance)
             nodesSortedByDistance.push_back(u);
 
         G->forNeighborsOf(u, [&](node v, edgeweight w) {
             double newDist = distances[u] + w;
+            if (newDist > __k_dist)
+                    return;
             if (distances[v] == infDist) {
                 distances[v] = newDist;
                 heap.push(v);

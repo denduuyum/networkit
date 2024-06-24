@@ -16,8 +16,8 @@
 
 namespace NetworKit {
 
-	Betweenness::Betweenness(const Graph &G, bool normalized, bool computeEdgeCentrality, int _K)
-		: Centrality(G, normalized, computeEdgeCentrality), __k_dist(_K) {}
+	Betweenness::Betweenness(const Graph &G, bool normalized, bool computeEdgeCentrality, edgeweight _K)
+            : Centrality(G, normalized, computeEdgeCentrality, _K) {}
 
 void Betweenness::run() {
     Aux::SignalHandler handler;
@@ -37,9 +37,9 @@ void Betweenness::run() {
     {
         omp_index i = omp_get_thread_num();
         if (G.isWeighted())
-            sssps[i] = std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, true));
+                sssps[i] = std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, true, none, __k_dist));
         else {
-		    sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true, none, __k_dist));
+                sssps[i] = std::unique_ptr<SSSP>(new BFS(G, 0, true, true, none, __k_dist));
         }
     }
 
@@ -67,7 +67,6 @@ void Betweenness::run() {
                 tmp.ToDouble(weight);
                 double c = weight * (1 + dependency[t]);
                 dependency[p] += c;
-
                 if (computeEdgeCentrality) {
                     const edgeid edgeId = G.edgeId(p, t);
 #pragma omp atomic
@@ -75,9 +74,10 @@ void Betweenness::run() {
                 }
             }
 
-            if (t != s)
+            if (t != s) {
 #pragma omp atomic
                 scoreData[t] += dependency[t];
+            }
         }
     };
     handler.assureRunning();

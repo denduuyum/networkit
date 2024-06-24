@@ -9,7 +9,8 @@ from libcpp cimport bool as bool_t
 from libcpp.string cimport string
 from libcpp.set cimport set
 from libcpp.unordered_map cimport unordered_map
-from libcpp cimport int 
+from libcpp cimport int
+from libcpp.limits cimport numeric_limits
 
 from .base cimport _Algorithm, Algorithm
 from .dynamics cimport _GraphEvent
@@ -156,7 +157,7 @@ cdef class STSP(Algorithm):
 cdef extern from "<networkit/distance/SSSP.hpp>":
 
 	cdef cppclass _SSSP "NetworKit::SSSP"(_Algorithm):
-		_SSSP(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target) except +
+		_SSSP(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target, edgeweight _K) except +
 		vector[edgeweight] &getDistances() except +
 		edgeweight distance(node t) except +
 		vector[node] getPredecessors(node t) except +
@@ -169,7 +170,7 @@ cdef extern from "<networkit/distance/SSSP.hpp>":
 
 cdef class SSSP(Algorithm):
 	""" 
-	SSSP(G, source, storePaths, storeNodesSortedByDistance, target)
+	SSSP(G, source, storePaths, storeNodesSortedByDistance, target, _K)
 
 	Base class for single source shortest path algorithms. 
 	"""
@@ -1403,14 +1404,15 @@ cdef class DynAPSP(APSP):
 			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
 		(<_DynAPSP*>(self._this)).updateBatch(_batch)
 
+
 cdef extern from "<networkit/distance/BFS.hpp>":
 
 	cdef cppclass _BFS "NetworKit::BFS"(_SSSP):
-		_BFS(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target, int _K) except +
+		_BFS(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target, edgeweight _K) except +
 
 cdef class BFS(SSSP):
 	""" 
-	BFS(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None, _K=3)
+	BFS(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None, _K=numertic_limits[edgeweight].max())
 	
 	Simple breadth-first search on a Graph from a given source.
 
@@ -1429,18 +1431,20 @@ cdef class BFS(SSSP):
         _K: k distance
 	"""
 
-	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, target=none, _K=3):
+	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, target=none, _K=numeric_limits[edgeweight].max()):
 		self._G = G
 		self._this = new _BFS(G._this, source, storePaths, storeNodesSortedByDistance, target, _K)
+
+
 
 cdef extern from "<networkit/distance/Dijkstra.hpp>":
 
 	cdef cppclass _Dijkstra "NetworKit::Dijkstra"(_SSSP):
-		_Dijkstra(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target) except +
+		_Dijkstra(_Graph G, node source, bool_t storePaths, bool_t storeNodesSortedByDistance, node target, edgeweight _K) except +
 
 cdef class Dijkstra(SSSP):
 	""" 
-	Dijkstra(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None)
+	Dijkstra(G, source, storePaths=True, storeNodesSortedByDistance=False, target=None, _K=numeric_limits[edgeweight].max())
 	
 	Dijkstra's SSSP algorithm. Returns list of weighted distances from node source, i.e. the length of the shortest path from source to
 	any other node.
@@ -1458,9 +1462,9 @@ cdef class Dijkstra(SSSP):
 	target: int or None, optional
 		Terminate search when the target has been reached. In default-mode, this target is set to None.
 	"""
-	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, node target=none):
+	def __cinit__(self, Graph G, source, storePaths=True, storeNodesSortedByDistance=False, node target=none, _K=numeric_limits[edgeweight].max()):
 		self._G = G
-		self._this = new _Dijkstra(G._this, source, storePaths, storeNodesSortedByDistance, target)
+		self._this = new _Dijkstra(G._this, source, storePaths, storeNodesSortedByDistance, target, _K)
 
 cdef extern from "<networkit/distance/MultiTargetBFS.hpp>":
 	cdef cppclass _MultiTargetBFS "NetworKit::MultiTargetBFS"(_STSP):

@@ -36,7 +36,7 @@ public:
      * @param target The target node.
      */
     SSSP(const Graph &G, node source, bool storePaths = true,
-         bool storeNodesSortedByDistance = false, node target = none);
+         bool storeNodesSortedByDistance = false, node target = none, edgeweight __k_dist = std::numeric_limits<edgeweight>::max());
 
     ~SSSP() override = default;
 
@@ -159,6 +159,7 @@ public:
     }
 
 protected:
+    edgeweight __k_dist;        
     const Graph *G;
     node source;
     node target;

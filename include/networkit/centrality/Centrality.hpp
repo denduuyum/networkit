@@ -28,7 +28,7 @@ public:
      * @param computeEdgeCentrality		If true, compute also edge centralities (for algorithms
      * where this is applicable)
      */
-    Centrality(const Graph &G, bool normalized = false, bool computeEdgeCentrality = false);
+     Centrality(const Graph &G, bool normalized = false, bool computeEdgeCentrality = false, edgeweight __k_dist = std::numeric_limits<edgeweight>::max());
 
     /**
      * Computes centrality scores on the graph passed in constructor.
@@ -91,6 +91,7 @@ protected:
     std::vector<double> edgeScoreData;
     bool normalized; // true if scores should be normalized in the interval [0,1]
     bool computeEdgeCentrality;
+    edgeweight __k_dist;
 };
 
 } /* namespace NetworKit */

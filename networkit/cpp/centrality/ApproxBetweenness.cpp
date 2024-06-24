@@ -20,22 +20,23 @@
 #include <memory>
 #include <omp.h>
 
+
 namespace NetworKit {
 
 ApproxBetweenness::ApproxBetweenness(const Graph &G, double epsilon, double delta,
-                                     double universalConstant, int _K)
-	: Centrality(G, true), epsilon(epsilon), delta(delta), universalConstant(universalConstant), __k_dist(_K) {}
+                                     double universalConstant, edgeweight _K)
+        : Centrality(G, true, false, _K), epsilon(epsilon), delta(delta), universalConstant(universalConstant) {}
 
 void ApproxBetweenness::run() {
     Aux::SignalHandler handler;
     scoreData.clear();
     scoreData.resize(G.upperNodeIdBound());
-
+    edgeweight infDist = std::numeric_limits<edgeweight>::max();
     edgeweight vd = 0;
 
 
     INFO("estimated diameter: ", vd);
-    if (__k_dist < 2147483647) {
+    if (__k_dist < infDist) {
             r = ceil((universalConstant / (epsilon * epsilon)) * (floor(log2(__k_dist - 1)) + 1 - log(delta)));
             vd = __k_dist;
             INFO("running k distance bc: ", __k_dist);
@@ -55,8 +56,8 @@ void ApproxBetweenness::run() {
     handler.assureRunning();
 #pragma omp parallel
     {
-        auto ssspPtr = G.isWeighted() ? std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, false))
-		: std::unique_ptr<SSSP>(new BFS(G, 0, true, false, none, __k_dist));
+            auto ssspPtr = G.isWeighted() ? std::unique_ptr<SSSP>(new Dijkstra(G, 0, true, false, none, __k_dist))
+                    : std::unique_ptr<SSSP>(new BFS(G, 0, true, false, none, __k_dist));
 
 #pragma omp for
         for (omp_index i = 1; i <= static_cast<omp_index>(r); i++) {

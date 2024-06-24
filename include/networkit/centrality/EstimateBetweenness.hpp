@@ -21,7 +21,6 @@ namespace NetworKit {
  * ApproxBetweenness.
  */
 class EstimateBetweenness : public Centrality {
-	int __k_dist;
 public:
     /**
      * The algorithm estimates the betweenness of all nodes, using weighting
@@ -34,7 +33,7 @@ public:
      * @param	parallel_flag	if true, run in parallel with additional memory cost z + 3z * t
      */
     EstimateBetweenness(const Graph &G, count nSamples, bool normalized = false,
-                        bool parallel_flag = false, int _K=2147483647);
+                        bool parallel_flag = false, edgeweight _K = std::numeric_limits<edgeweight>::max());
 
     /**
      * Computes betweenness estimation on the graph passed in constructor.
