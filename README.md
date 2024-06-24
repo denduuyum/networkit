@@ -6,6 +6,9 @@
   <a href="https://mybinder.org/v2/gh/networkit/networkit/master?urlpath=lab/tree/notebooks/User-Guide.ipynb"><img src="https://mybinder.org/badge_logo.svg"></a>
 </p>
 
+##
+This fork of NetworKit library contains distance limited betweenness algorithms.
+
 ## 
 [NetworKit][networkit] is an open-source tool suite for high-performance
 network analysis. Its aim is to provide tools for the analysis of large
