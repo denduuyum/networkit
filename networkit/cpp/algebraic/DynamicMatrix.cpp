@@ -148,7 +148,7 @@ DynamicMatrix DynamicMatrix::operator*(const DynamicMatrix &other) const {
     assert(nCols == other.nRows);
 
     DynamicMatrix result(numberOfRows(), other.numberOfColumns());
-    SparseAccumulator spa(other.numberOfRows());
+    SparseAccumulator spa(other.numberOfColumns());
     for (index r = 0; r < numberOfRows(); ++r) {
         graph.forNeighborsOf(r, [&](node v, double w1) {
             other.graph.forNeighborsOf(v, [&](node u, double w2) {
@@ -312,7 +312,7 @@ DynamicMatrix DynamicMatrix::incidenceMatrix(const Graph &graph, double zero) {
 }
 
 DynamicMatrix DynamicMatrix::laplacianMatrix(const Graph &graph, double zero) {
-    DynamicMatrix L(graph.upperNodeIdBound(), zero);
+    DynamicMatrix L(graph.numberOfNodes(), zero);
     graph.forNodes([&](const index i) {
         double weightedDegree = 0.0;
 
@@ -323,7 +323,8 @@ DynamicMatrix DynamicMatrix::laplacianMatrix(const Graph &graph, double zero) {
             }
         });
 
-        L.setValue(i, i, weightedDegree); // degree matrix
+        if (weightedDegree != 0)
+            L.setValue(i, i, weightedDegree); // degree matrix
     });
 
     return L;

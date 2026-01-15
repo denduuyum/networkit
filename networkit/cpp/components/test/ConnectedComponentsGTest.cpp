@@ -10,6 +10,7 @@
 #include <networkit/components/DynConnectedComponents.hpp>
 #include <networkit/components/DynWeaklyConnectedComponents.hpp>
 #include <networkit/components/ParallelConnectedComponents.hpp>
+#include <networkit/components/RandomSpanningForest.hpp>
 #include <networkit/components/StronglyConnectedComponents.hpp>
 #include <networkit/components/WeaklyConnectedComponents.hpp>
 #include <networkit/generators/ErdosRenyiGenerator.hpp>
@@ -18,8 +19,6 @@
 
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/distance/Diameter.hpp>
-#include <networkit/generators/DorogovtsevMendesGenerator.hpp>
-#include <networkit/generators/HavelHakimiGenerator.hpp>
 #include <networkit/io/EdgeListReader.hpp>
 #include <networkit/io/KONECTGraphReader.hpp>
 #include <networkit/io/METISGraphReader.hpp>
@@ -76,6 +75,11 @@ TEST_F(ConnectedComponentsGTest, testConnectedComponents) {
     EXPECT_EQ(1029u, cc.numberOfComponents());
 }
 
+TEST_F(ConnectedComponentsGTest, testParallelConnectedComponentsThowsForDirectedGraph) {
+    Graph G(2, false, true);
+    EXPECT_THROW(ParallelConnectedComponents test(G), std::runtime_error);
+}
+
 TEST_F(ConnectedComponentsGTest, testParallelConnectedComponents) {
     METISGraphReader reader;
     std::vector<std::string> graphs = {"PGPgiantcompo", "celegans_metabolic", "hep-th", "jazz"};
@@ -91,7 +95,7 @@ TEST_F(ConnectedComponentsGTest, testParallelConnectedComponents) {
         DEBUG("Number of components: ", seqNum);
         EXPECT_EQ(seqNum, parNum);
         G.forNodes([&](node u) { EXPECT_EQ(cc.componentOfNode(u), ccPar.componentOfNode(u)); });
-        ccPar.runSequential();
+        ccPar.run();
         parNum = ccPar.numberOfComponents();
         EXPECT_EQ(seqNum, parNum);
         G.forNodes([&](node u) { EXPECT_EQ(cc.componentOfNode(u), ccPar.componentOfNode(u)); });
@@ -583,6 +587,23 @@ TEST_F(ConnectedComponentsGTest, testExtractLargestStronglyConnectedComponent) {
             ++u;
         });
     }
+}
+
+TEST_F(ConnectedComponentsGTest, testRandomSpanningForest) {
+    Graph G(5);
+    G.addEdge(0, 1);
+    G.addEdge(2, 1);
+    G.addEdge(3, 1);
+    G.addEdge(4, 1);
+    G.addEdge(2, 4);
+    G.addEdge(0, 3);
+
+    RandomSpanningForest RSF(G);
+    RSF.run();
+    auto forest = RSF.getForest();
+    auto n = G.numberOfNodes();
+    EXPECT_EQ(forest.numberOfNodes(), n);
+    EXPECT_EQ(forest.numberOfEdges(), n - 1);
 }
 
 } /* namespace NetworKit */

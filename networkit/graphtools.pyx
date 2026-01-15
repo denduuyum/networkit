@@ -11,37 +11,39 @@ from .structures cimport count, index, node, edgeweight
 
 cdef extern from "<networkit/graph/GraphTools.hpp>" namespace "NetworKit::GraphTools":
 
-	count maxDegree(_Graph G) nogil except +
-	count maxInDegree(_Graph G) nogil except +
-	edgeweight maxWeightedDegree(_Graph G) nogil except +
-	edgeweight maxWeightedInDegree(_Graph G) nogil except +
-	node randomNode(_Graph G) nogil except +
-	vector[node] randomNodes(_Graph G, count n) nogil except +
-	node randomNeighbor(_Graph G, node u) nogil except +
-	pair[node, node] randomEdge(_Graph G, bool_t uniformDistribution) nogil except +
-	vector[pair[node, node]] randomEdges(_Graph G, count numEdges) nogil except +
-	pair[count, count] size(_Graph G) nogil except +
-	double density(_Graph G) nogil except +
-	double volume(_Graph G) nogil except +
-	double volume[InputIt](_Graph G, InputIt first, InputIt last) nogil except +
-	double inVolume[InputIt](_Graph G, InputIt first, InputIt last) nogil except +
-	_Graph copyNodes(_Graph G) nogil except +
-	_Graph toUndirected(_Graph G) nogil except +
-	_Graph toUnweighted(_Graph G) nogil except +
-	_Graph toWeighted(_Graph G) nogil except +
-	_Graph subgraphFromNodes[InputIt](_Graph G, InputIt first, InputIt last, bool_t compact) nogil except +
-	_Graph subgraphAndNeighborsFromNodes(_Graph G, unordered_set[node], bool_t, bool_t) nogil except +
-	void append(_Graph G, _Graph G1) nogil except +
-	void merge(_Graph G, _Graph G1) nogil except +
+	count maxDegree(_Graph G) except + nogil
+	count maxInDegree(_Graph G) except + nogil
+	edgeweight maxWeightedDegree(_Graph G) except + nogil
+	edgeweight maxWeightedInDegree(_Graph G) except + nogil
+	node randomNode(_Graph G) except + nogil
+	vector[node] randomNodes(_Graph G, count n) except + nogil
+	node randomNeighbor(_Graph G, node u) except + nogil
+	pair[node, node] randomEdge(_Graph G, bool_t uniformDistribution) except + nogil
+	vector[pair[node, node]] randomEdges(_Graph G, count numEdges) except + nogil
+	pair[count, count] size(_Graph G) except + nogil
+	double density(_Graph G) except + nogil
+	double volume(_Graph G) except + nogil
+	double volume[InputIt](_Graph G, InputIt first, InputIt last) except + nogil
+	double inVolume[InputIt](_Graph G, InputIt first, InputIt last) except + nogil
+	_Graph copyNodes(_Graph G) except + nogil
+	_Graph toUndirected(_Graph G) except + nogil
+	_Graph toUnweighted(_Graph G) except + nogil
+	_Graph toWeighted(_Graph G) except + nogil
+	_Graph subgraphFromNodes[InputIt](_Graph G, InputIt first, InputIt last, bool_t compact) except + nogil
+	_Graph subgraphAndNeighborsFromNodes(_Graph G, unordered_set[node], bool_t, bool_t) except + nogil
+	void append(_Graph G, _Graph G1) except + nogil
+	void merge(_Graph G, _Graph G1) except + nogil
 	void removeEdgesFromIsolatedSet[InputIt](_Graph G, InputIt first, InputIt last) except +
-	_Graph getCompactedGraph(_Graph G, unordered_map[node,node]) nogil except +
-	_Graph transpose(_Graph G) nogil except +
-	unordered_map[node,node] getContinuousNodeIds(_Graph G) nogil except +
-	unordered_map[node,node] getRandomContinuousNodeIds(_Graph G) nogil except +
-	void sortEdgesByWeight(_Graph G, bool_t) nogil except +
-	vector[node] topologicalSort(_Graph G) nogil except +
-	node augmentGraph(_Graph G) nogil except +
-	pair[_Graph, node] createAugmentedGraph(_Graph G) nogil except +
+	_Graph getCompactedGraph(_Graph G, unordered_map[node,node]) except + nogil
+	_Graph transpose(_Graph G) except + nogil
+	unordered_map[node,node] getContinuousNodeIds(_Graph G) except + nogil
+	unordered_map[node,node] getRandomContinuousNodeIds(_Graph G) except + nogil
+	void sortEdgesByWeight(_Graph G, bool_t) except + nogil
+	vector[node] topologicalSort(_Graph G) except + nogil
+	vector[node] topologicalSort(_Graph G, unordered_map[node, node], bool_t) except + nogil
+	node augmentGraph(_Graph G) except + nogil
+	pair[_Graph, node] createAugmentedGraph(_Graph G) except + nogil
+	void randomizeWeights(_Graph G) except + nogil
 
 cdef class GraphTools:
 
@@ -403,7 +405,7 @@ cdef class GraphTools:
 		if nodes is not None:
 			try:
 				cNodes = <vector[node]?>nodes
-				return volume[vector[node].iterator](graph._this, cNodes.begin(), cNodes.end())
+				return volume(graph._this, cNodes.begin(), cNodes.end())
 			except TypeError:
 				raise RuntimeError("Error, nodes must be a list of nodes.")
 		else:
@@ -458,28 +460,16 @@ cdef class GraphTools:
 		return Graph().setThis(copyNodes(graph._this))
 
 	@staticmethod
-	def subgraphFromNodes(Graph graph, vector[node] nodes, includeOutNeighbors=False, includeInNeighbors=False, bool_t compact = False):
+	def subgraphFromNodes(Graph graph, vector[node] nodes, bool_t compact = False):
 		"""
 		subgraphFromNodes(graph, list(int) nodes, includeOutNeighbors=False, includeInNeighbors=False, compact = False)
-		
-		Returns an induced subgraph of this graph (including potential edge
-		weights/directions)
 
-		The subgraph contains all nodes in Nodes  and all edges which
-		have one end point in Nodes and the other in Nodes.
-
-		Parameters:
-		-----------
+		Parameters
+		----------
 		graph : networkit.Graph
 			The input graph.
 		nodes : list(int)
 			Nodes in the induced subgraph.
-		includeOutNeighbors : bool, optional
-			DEPRECATED. Use subgraphAndNeighborsFromNodes instead.
-			If set to true, out-neighbors will also be included. Default: False
-		includeInNeighbors : bool, optional
-			DEPRECATED. Use subgraphAndNeighborsFromNodes instead.
-			If set to true, in-neighbors will also be included. Default: False
 		compact : bool, optional
 			Indicates whether the resulting graph shall have compact, continuous node ids.
 			If False node ids of the input graph are kept. Default: False
@@ -487,23 +477,11 @@ cdef class GraphTools:
 		Returns
 		-------
 		graph : networkit.Graph
-			Induced subgraph.
+			Induced subgraph of the input graph (including potential edge/weight directions).
 		"""
-		# Deprecated compatibility wrapper. We use "vector" to
-		# preserve the sorting of the nodes for compact
-		# subgraphs and only convert to unordered_set when
-		# needed.
-		cdef unordered_set[node] nodeSet
 
-		if includeInNeighbors or includeOutNeighbors:
-			if compact:
-				raise RuntimeError("Compaction is not supported with includeOutNeighbors or includeInNeighbors")
-			nodeSet.insert(nodes.begin(), nodes.end())
-			return Graph().setThis(subgraphAndNeighborsFromNodes(
-			    	graph._this, nodeSet, includeOutNeighbors, includeInNeighbors))
-		else:
-			return Graph().setThis(subgraphFromNodes(
-			    	graph._this, nodes.begin(), nodes.end(), compact))
+		return Graph().setThis(subgraphFromNodes(
+				graph._this, nodes.begin(), nodes.end(), compact))
 
 	@staticmethod
 	def subgraphAndNeighborsFromNodes(Graph graph, nodes, includeOutNeighbors=False, includeInNeighbors=False):
@@ -652,24 +630,37 @@ cdef class GraphTools:
 		sortEdgesByWeight(G._this, decreasing)
 
 	@staticmethod
-	def topologicalSort(Graph G):
+	def topologicalSort(Graph G, dict[node, node] nodeIdMap = None, bool_t checkMapping = False):
 		"""
-		topologicalSort(G)
+		topologicalSort(G, nodeIdMap = None, checkMapping = False)
 
 		Given a directed graph G, the topology sort algorithm creates one valid topology order of nodes.
 		Undirected graphs are not accepted as input, since a topology sort is a linear ordering of vertices 
 		such that for every edge u -> v, node u comes before v in the ordering.
+		Node ids must either be continuous or you must provide a continuous node id mapping.
 
 		Parameters
 		----------
 		G : networkit.Graph
 			The directed input graph.
+		nodeIdMap : dict(int, int), optional
+					Optional continuous node id mapping.
+		checkMapping : bool, optional
+					   Flag to determine if the node id mapping should be checked that it 
+					   is continuous. This check takes O(|V|) time and space.
 		"""
+		cdef unordered_map[node,node] cNodeIdMap
+		if nodeIdMap is not None:
+			for node, mapped in nodeIdMap.items():
+				cNodeIdMap[node] = mapped
+			return topologicalSort(G._this, cNodeIdMap, checkMapping)
 		return topologicalSort(G._this)
 
 	@staticmethod
 	def augmentGraph(Graph G):
 		"""
+		augmentGraph(G)
+
 		Augments the input graph in-place as required by ForestCentrality. With respect to the input
 		graph G, the augmented graph has a new root node connected to all the other nodes in the graph.
 
@@ -688,6 +679,8 @@ cdef class GraphTools:
 	@staticmethod
 	def createAugmentedGraph(Graph G):
 		"""
+		createAugmentedGraph(G)
+
 		Constructs an augmented graph as required by ForestCentrality. With respect to the input
 		graph G, the augmented graph has a new root node connected to all the other nodes in the
 		graph.
@@ -705,3 +698,20 @@ cdef class GraphTools:
 		"""
 		result = createAugmentedGraph(G._this)
 		return Graph().setThis(result.first), result.second
+
+	@staticmethod
+	def randomizeWeights(Graph G):
+		"""
+		randomizeWeights(G)
+
+		Randomizes the weights of the given graph. The weights are uniformly distributed in
+		the range [0, 1] by default, unless a different distribution is provided. However it
+		is only strictly in-place for already weighted graphs. For unweighted graphs a copy is
+		created before randomizing weights.
+
+		Parameters
+		----------
+		G : networkit.Graph
+			The input graph.
+		"""
+		randomizeWeights(G._this)

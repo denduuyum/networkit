@@ -10,6 +10,7 @@ import os
 import math
 import numpy as np
 import random
+import timeit
 import warnings
 try:
 	import tabulate
@@ -27,10 +28,10 @@ from .graphio import PartitionReader, PartitionWriter, EdgeListPartitionReader, 
 from .scd cimport _SelectiveCommunityDetector, SelectiveCommunityDetector
 
 from . import graph
+from .graphtools import GraphTools
 from .algebraic import laplacianEigenvectors
 from .centrality import CoreDecomposition
 from .coarsening import ParallelPartitionCoarsening
-from . import stopwatch
 from . import graphio
 from .helpers import stdstring
 from .support import MissingDependencyError
@@ -236,9 +237,9 @@ cdef extern from "<networkit/community/GraphClusteringTools.hpp>" namespace "Net
 
 cdef class GraphClusteringTools:
 	@staticmethod
-	def getImbalance(Partition zeta, Graph graph = None):
+	def getImbalance(Partition zeta, Graph G = None):
 		"""  
-		getImbalance(zeta)
+		getImbalance(zeta, G)
 
 		Get the imbalance of clusters in the given partition.
 
@@ -246,7 +247,7 @@ cdef class GraphClusteringTools:
 		----------
 		zeta : networkit.Partition
 			The first partition.
-		graph : networkit.Graph, optional
+		G : networkit.Graph, optional
 			The input graph to compare the imbalance to. Default: None
 
 		Returns
@@ -255,7 +256,7 @@ cdef class GraphClusteringTools:
 			Imbalance of the partition.
 		"""
 		if graph is not None:
-			return getImbalance(zeta._this, graph._this)
+			return getImbalance(zeta._this, G._this)
 		else:
 			return getImbalance(zeta._this)
 
@@ -407,7 +408,10 @@ cdef class PartitionIntersection:
 	"""
 	cdef _PartitionIntersection _this
 	def calculate(self, Partition zeta, Partition eta):
-		"""  Calculate the intersection of two partitions `zeta` and `eta`
+		"""  
+		calculate(zeta, eta)
+		
+		Calculate the intersection of two partitions `zeta` and `eta`.
 
 		Parameters
 		----------
@@ -497,7 +501,7 @@ cdef extern from "<networkit/community/Modularity.hpp>":
 
 	cdef cppclass _Modularity "NetworKit::Modularity":
 		_Modularity() except +
-		double getQuality(_Partition _zeta, _Graph _G) nogil except +
+		double getQuality(_Partition _zeta, _Graph _G) except + nogil
 
 
 cdef class Modularity:
@@ -506,7 +510,7 @@ cdef class Modularity:
 
 	Modularity is a quality index for community detection.
 	It assigns a quality value in [-0.5, 1.0] to a partition of a graph which is higher for more modular networks and
-	partitions which better capture the modular structure. See also http://en.wikipedia.org/wiki/Modularity_(networks).
+	partitions which better capture the modular structure. See also http://en.wikipedia.org/wiki/Modularity_(networks) .
 
  	Notes
 	-----
@@ -740,7 +744,7 @@ cdef class LouvainMapEquation(CommunityDetector):
 	hierarchical: bool, optional
 		Iteratively create a graph of the locally optimal clusters and optimize locally on that graph.
 	maxIterations: int, optional
-		The maximum number of local move iterations.
+		The maximum number of local move iterations. Default: 32
 	parallelizationStrategy: str, optional
 		Parallelization strategy, possible values: "relaxmap", "synchronous", "none". Default: "relaxmap"
 	"""
@@ -771,6 +775,8 @@ cdef class PLP(CommunityDetector):
 		The graph on which the algorithm has to run.
 	updateThreshold : int, optional
 		number of nodes that have to be changed in each iteration so that a new iteration starts. Default: None
+	maxIterations: int, optional
+		The maximum number of local move iterations. Default: None	
 	baseClustering : networkit.Partition, optional
 		PLP needs a base clustering to start from; if none is given the algorithm will 
 		run on a singleton clustering. Default: None
@@ -901,7 +907,7 @@ cdef extern from "<networkit/community/CutClustering.hpp>":
 
 cdef extern from "<networkit/community/CutClustering.hpp>" namespace "NetworKit::CutClustering":
 
-	map[double, _Partition] CutClustering_getClusterHierarchy "NetworKit::CutClustering::getClusterHierarchy"(const _Graph& G) nogil except +
+	map[double, _Partition] CutClustering_getClusterHierarchy "NetworKit::CutClustering::getClusterHierarchy"(const _Graph& G) except + nogil
 
 
 cdef class CutClustering(CommunityDetector):
@@ -965,7 +971,7 @@ cdef extern from "<networkit/community/NodeStructuralRandMeasure.hpp>":
 
 	cdef cppclass _NodeStructuralRandMeasure "NetworKit::NodeStructuralRandMeasure":
 		_NodeStructuralRandMeasure() except +
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
 
 cdef class NodeStructuralRandMeasure(DissimilarityMeasure):
 	""" 
@@ -1006,7 +1012,7 @@ cdef extern from "<networkit/community/GraphStructuralRandMeasure.hpp>":
 
 	cdef cppclass _GraphStructuralRandMeasure "NetworKit::GraphStructuralRandMeasure":
 		_GraphStructuralRandMeasure() except +
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
 
 cdef class GraphStructuralRandMeasure(DissimilarityMeasure):
 	""" 
@@ -1047,7 +1053,7 @@ cdef extern from "<networkit/community/JaccardMeasure.hpp>":
 
 	cdef cppclass _JaccardMeasure "NetworKit::JaccardMeasure":
 		_JaccardMeasure() except +
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
 
 cdef class JaccardMeasure(DissimilarityMeasure):
 	""" 
@@ -1084,7 +1090,7 @@ cdef extern from "<networkit/community/NMIDistance.hpp>":
 
 	cdef cppclass _NMIDistance "NetworKit::NMIDistance":
 		_NMIDistance() except +
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
 
 cdef class NMIDistance(DissimilarityMeasure):
 	""" 
@@ -1123,7 +1129,7 @@ cdef class NMIDistance(DissimilarityMeasure):
 cdef extern from "<networkit/community/AdjustedRandMeasure.hpp>":
 
 	cdef cppclass _AdjustedRandMeasure "NetworKit::AdjustedRandMeasure":
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
 
 cdef class AdjustedRandMeasure(DissimilarityMeasure):
 	"""
@@ -1166,7 +1172,7 @@ cdef extern from "<networkit/community/LocalCommunityEvaluation.hpp>":
 		double getMaximumValue() except +
 		double getMinimumValue() except +
 		double getValue(index i) except +
-		vector[double] &getValues() except +
+		vector[double] getValues() except +
 		bool_t isSmallBetter() except +
 
 cdef class LocalCommunityEvaluation(Algorithm):
@@ -1647,11 +1653,11 @@ def detectCommunities(G, algo=None, inspect=True):
 	"""
 	if algo is None:
 		algo = PLM(G, refine=False)
-	t = stopwatch.Timer()
+	start = timeit.default_timer()
 	algo.run()
 	zeta = algo.getPartition()
-	t.stop()
-	print("Communities detected in {:.5f} [s]".format(t.elapsed))
+	end = timeit.default_timer()
+	print("Communities detected in {:.5f} [s]".format(end - start))
 	if inspect:
 		print ("solution properties:")
 		inspectCommunities(zeta, G)
@@ -1734,12 +1740,12 @@ def evalCommunityDetection(algo, G):
 
 	if not have_tabulate:
 		raise MissingDependencyError("tabulate")
-	t = stopwatch.Timer()
+	start = timeit.default_timer()
 	algo.run()
 	zeta = algo.getPartition()
-	t.stop()
+	end = timeit.default_timer()
 	results = [
-		["time [s]", t.elapsed],
+		["time [s]", (end - start)],
 		["# communities", zeta.numberOfSubsets()],
 		["modularity", Modularity().getQuality(zeta, G)]
 	]
@@ -1839,13 +1845,17 @@ def kCoreCommunityDetection(G, k, algo=None, inspect=True):
 	coreDec = CoreDecomposition(G)
 	coreDec.run()
 
-	cores = coreDec.cores()
-	try:
-		kCore = cores[k]
-	except IndexError:
+	cores = coreDec.scores()
+
+	kCore = []
+	partition = coreDec.getPartition()
+	for i in range(k, partition.numberOfSubsets() + 1):
+		kCore.extend(partition.getMembers(i))
+
+	if len(kCore) == 0:
 		raise RuntimeError("There is no core for the specified k")
 
-	C = graph.Subgraph().fromNodes(G, kCore)	# FIXME: node indices are not preserved
+	C = GraphTools.subgraphFromNodes(G, kCore)
 
 	#properties.overview(C)
 
@@ -1889,7 +1899,7 @@ cdef extern from "<networkit/community/OverlappingNMIDistance.hpp>" namespace "N
 		MAX,
 		JOINT_ENTROPY
 
-class Normalization:
+class Normalization(object):
 	MIN = _Normalization.MIN
 	GEOMETRIC_MEAN = _Normalization.GEOMETRIC_MEAN
 	ARITHMETIC_MEAN = _Normalization.ARITHMETIC_MEAN
@@ -1907,8 +1917,8 @@ cdef extern from "<networkit/community/OverlappingNMIDistance.hpp>":
 		_OverlappingNMIDistance() except +
 		_OverlappingNMIDistance(_Normalization normalization) except +
 		void setNormalization(_Normalization normalization) except +
-		double getDissimilarity(_Graph G, _Partition first, _Partition second) nogil except +
-		double getDissimilarity(_Graph G, _Cover first, _Cover second) nogil except +
+		double getDissimilarity(_Graph G, _Partition first, _Partition second) except + nogil
+		double getDissimilarity(_Graph G, _Cover first, _Cover second) except + nogil
 
 cdef class OverlappingNMIDistance(DissimilarityMeasure):
 	"""
@@ -2016,8 +2026,8 @@ cdef class OverlappingNMIDistance(DissimilarityMeasure):
 		return ret
 
 	def _validateNormalization(self, _Normalization normalization):
-		if normalization not in {OverlappingNMIDistance.Min, OverlappingNMIDistance.GeometricMean,
-				OverlappingNMIDistance.ArithmeticMean, OverlappingNMIDistance.Max, OverlappingNMIDistance.JointEntropy}:
+		if normalization not in {Normalization.MIN, Normalization.GEOMETRIC_MEAN,
+				Normalization.ARITHMETIC_MEAN, Normalization.MAX, Normalization.JOINT_ENTROPY}:
 			raise ValueError("Error, invalid normalization method")
 
 class SpectralPartitioner:
@@ -2070,7 +2080,7 @@ class SpectralPartitioner:
 
 	def _trisect(self, partition=None, iteration=1):
 		if partition is None:
-			vertices = self.graph.iterNodes()
+			vertices = list(self.graph.iterNodes())
 		else:
 			vertices = self.partitions[partition]
 
@@ -2110,7 +2120,7 @@ class SpectralPartitioner:
 			return
 
 		if partition is None:
-			vertices = self.graph.iterNodes()
+			vertices = list(self.graph.iterNodes())
 		else:
 			vertices = self.partitions[partition]
 

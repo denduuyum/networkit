@@ -13,11 +13,11 @@
 #include <algorithm>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <numeric>
 #include <omp.h>
 #include <queue>
+#include <ranges>
 #include <sstream>
 #include <stack>
 #include <stdexcept>
@@ -32,6 +32,12 @@
 #include <networkit/auxiliary/FunctionTraits.hpp>
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/auxiliary/Random.hpp>
+#include <networkit/graph/Attributes.hpp>
+#include <networkit/graph/EdgeIterators.hpp>
+#include <networkit/graph/NeighborIterators.hpp>
+#include <networkit/graph/NodeIterators.hpp>
+
+#include <tlx/define/deprecated.hpp>
 
 namespace NetworKit {
 
@@ -124,6 +130,14 @@ class Graph final {
     //!< true if edge ids have been assigned
     bool edgesIndexed;
 
+    //!< true if edge removals should maintain compact edge ids
+    bool maintainCompactEdges = false;
+    //!< true if edge removals should maintain sorted edge ids
+    bool maintainSortedEdges = false;
+
+    //!< saves the ID of the most recently removed edge (if exists)
+    edgeid deletedID;
+
     // per node data
     //!< exists[v] is true if node v has not been removed from the graph
     std::vector<bool> exists;
@@ -146,354 +160,26 @@ class Graph final {
     std::vector<std::vector<edgeid>> outEdgeIds;
 
 private:
-    // base class for all node attribute storages with attribute type info
-    // independent of the attribute type, holds bookkeeping info only:
-    // - attribute name
-    // - type info of derived (real storage holding) classes
-    // - which indices are valid
-    // - number of valid indices
-    // - the associated graph (who knows, which nodes exist)
-    // - the validity of the whole storage (initially true, false after detach)
-    class NodeAttributeStorageBase {
-    public:
-        NodeAttributeStorageBase(const Graph *graph, std::string name, std::type_index type)
-            : name{std::move(name)}, type{type}, theGraph{graph}, validStorage{true} {}
-
-        void invalidateStorage() { validStorage = false; }
-
-        const std::string &getName() const noexcept { return name; }
-
-        std::type_index getType() const noexcept { return type; }
-
-        bool isValid(node n) const noexcept { return n < valid.size() && valid[n]; }
-
-        // Called by Graph when node n is deleted.
-        void invalidate(node n) {
-            if (isValid(n)) {
-                valid[n] = false;
-                --validElements;
-            }
-        }
-
-    protected:
-        void markValid(node n) {
-            if (!theGraph->hasNode(n))
-                throw std::runtime_error("This node does not exist");
-
-            if (n >= valid.size())
-                valid.resize(n + 1);
-
-            if (!valid[n]) {
-                valid[n] = true;
-                ++validElements;
-            }
-        }
-
-        void checkIndex(node n) const {
-            if (!theGraph->hasNode(n)) {
-                throw std::runtime_error("This node does not exist");
-            }
-            if (!isValid(n)) {
-                throw std::runtime_error("Invalid attribute value");
-            }
-        }
-
-    private:
-        std::string name;
-        std::type_index type;
-        std::vector<bool> valid; // For each node: whether attribute is set or not.
-    protected:
-        index validElements = 0;
-        const Graph *theGraph;
-        bool validStorage; // Validity of the whole storage
-
-    }; // class NodeAttributeStorageBase
-
-    template <typename T>
-    class NodeAttribute;
-
-    template <typename T>
-    class NodeAttributeStorage : public NodeAttributeStorageBase {
-    public:
-        NodeAttributeStorage(const Graph *theGraph, std::string name)
-            : NodeAttributeStorageBase{theGraph, std::move(name), typeid(T)} {}
-
-        void resize(node i) {
-            if (i >= values.size())
-                values.resize(i + 1);
-        }
-
-        auto size() const noexcept { return validElements; }
-
-        void set(node i, T &&v) {
-            markValid(i);
-            resize(i);
-            values[i] = std::move(v);
-        }
-
-        // instead of returning an std::optional (C++17) we provide these
-        // C++14 options
-        // (1) throw an exception when invalid:
-        T get(node i) const { // may throw
-            checkIndex(i);
-            return values[i];
-        }
-
-        // (2) give default value when invalid:
-        T get(node i, T defaultT) const noexcept {
-            if (i >= values.size() || !isValid(i))
-                return defaultT;
-            return values[i];
-        }
-
-        friend NodeAttribute<T>;
-
-    private:
-        using NodeAttributeStorageBase::theGraph;
-        std::vector<T> values; // the real attribute storage
-    };                         // class NodeAttributeStorage<T>
-
-    template <typename T>
-    class NodeAttribute {
-    public:
-        class Iterator {
-        public:
-            // The value type of the nodes (i.e. nodes). Returned by
-            // operator*().
-            using value_type = T;
-
-            // Reference to the value_type, required by STL.
-            using reference = value_type &;
-
-            // Pointer to the value_type, required by STL.
-            using pointer = value_type *;
-
-            // STL iterator category.
-            using iterator_category = std::forward_iterator_tag;
-
-            // Signed integer type of the result of subtracting two pointers,
-            // required by STL.
-            using difference_type = ptrdiff_t;
-
-            Iterator() : storage{nullptr}, idx{0} {}
-            Iterator(NodeAttributeStorage<T> *storage) : storage{storage}, idx{0} {
-                if (storage) {
-                    nextValid();
-                }
-            }
-
-            Iterator &nextValid() {
-                while (storage && !storage->isValid(idx)) {
-                    if (idx >= storage->values.size()) {
-                        storage = nullptr;
-                        return *this;
-                    }
-                    ++idx;
-                }
-                return *this;
-            }
-
-            Iterator &operator++() {
-                if (!storage) {
-                    throw std::runtime_error("Invalid attribute iterator");
-                }
-                ++idx;
-                return nextValid();
-            }
-
-            auto operator*() const {
-                if (!storage) {
-                    throw std::runtime_error("Invalid attribute iterator");
-                }
-                return std::make_pair(idx, storage->values[idx]);
-            }
-
-            bool operator==(Iterator const &iter) const noexcept {
-                if (storage == nullptr && iter.storage == nullptr) {
-                    return true;
-                }
-                return storage == iter.storage && idx == iter.idx;
-            }
-
-            bool operator!=(Iterator const &iter) const noexcept { return !(*this == iter); }
-
-        private:
-            NodeAttributeStorage<T> *storage;
-            index idx;
-        }; // class Iterator
-
-    private:
-        class IndexProxy {
-            // a helper class for distinguished read and write on an indexed
-            // attribute
-            // operator[] on an attribute yields an IndexProxy holding
-            // location and index of access
-            //    - casting an IndexProxy to the attribute type reads the value
-            //    - assigning to it (operator=) writes the value
-        public:
-            IndexProxy(NodeAttributeStorage<T> *storage, index idx) : storage{storage}, idx{idx} {}
-
-            // reading at idx
-            operator T() const {
-                storage->checkIndex(idx);
-                return storage->values[idx];
-            }
-
-            // writing at idx
-            T &operator=(T &&other) {
-                storage->set(idx, std::move(other));
-                return storage->values[idx];
-            }
-
-        private:
-            NodeAttributeStorage<T> *storage;
-            index idx;
-        }; // class IndexProxy
-    public:
-        explicit NodeAttribute(std::shared_ptr<NodeAttributeStorage<T>> ownedStorage = nullptr)
-            : ownedStorage{ownedStorage}, valid{ownedStorage != nullptr} {}
-
-        NodeAttribute(NodeAttribute const &other)
-            : ownedStorage{other.ownedStorage}, valid{other.valid} {}
-
-        NodeAttribute &operator=(NodeAttribute other) {
-            this->swap(other);
-            return *this;
-        }
-
-        void swap(NodeAttribute &other) {
-            std::swap(ownedStorage, other.ownedStorage);
-            std::swap(valid, other.valid);
-        }
-
-        NodeAttribute(NodeAttribute &&other) noexcept
-            : ownedStorage{std::move(other.ownedStorage)}, valid{other.valid} {
-            other.valid = false;
-        }
-
-        auto begin() const {
-            checkAttribute();
-            return Iterator(ownedStorage.get()).nextValid();
-        }
-
-        auto end() const { return Iterator(nullptr); }
-
-        auto size() const noexcept { return ownedStorage->size(); }
-
-        void set(node i, T v) {
-            checkAttribute();
-            ownedStorage->set(i, std::move(v));
-        }
-
-        auto get(node i) const {
-            checkAttribute();
-            return ownedStorage->get(i);
-        }
-
-        auto get(node i, T defaultT) const {
-            checkAttribute();
-            return ownedStorage->get(i, defaultT);
-        }
-
-        IndexProxy operator[](node i) const {
-            checkAttribute();
-            return IndexProxy(ownedStorage.get(), i);
-        }
-
-        void checkAttribute() const {
-            if (!ownedStorage->validStorage)
-                throw std::runtime_error("Invalid attribute");
-        }
-
-        void write(std::string const &filename) const {
-            std::ofstream out(filename);
-            if (!out)
-                ERROR("cannot open ", filename, " for writing");
-
-            for (auto it = begin(); it != end(); ++it) {
-                auto pair = *it;
-                auto n = pair.first;  // node
-                auto v = pair.second; // value
-                out << n << "\t" << v << "\n";
-            }
-            out.close();
-        }
-
-        void read(const std::string &filename) {
-            std::ifstream in(filename);
-            if (!in) {
-                ERROR("cannot open ", filename, " for reading");
-            }
-            node n; // node
-            T v;    // value
-            std::string line;
-            while (std::getline(in, line)) {
-                std::istringstream istring(line);
-                istring >> n >> v;
-                set(n, v);
-            }
-        }
-
-    private:
-        std::shared_ptr<NodeAttributeStorage<T>> ownedStorage;
-        bool valid;
-    }; // class NodeAttribute
-
-    class NodeAttributeMap {
-        friend Graph;
-        const Graph *theGraph;
-
-    public:
-        std::unordered_map<std::string, std::shared_ptr<NodeAttributeStorageBase>> attrMap;
-
-        NodeAttributeMap(const Graph *g) : theGraph{g} {}
-
-        auto find(std::string const &name) {
-            auto it = attrMap.find(name);
-            if (it == attrMap.end()) {
-                throw std::runtime_error("No such attribute");
-            }
-            return it;
-        }
-
-        template <typename T>
-        auto attach(const std::string &name) {
-            auto ownedPtr = std::make_shared<NodeAttributeStorage<T>>(theGraph, std::string{name});
-            auto insertResult = attrMap.emplace(ownedPtr->getName(), ownedPtr);
-            auto success = insertResult.second;
-            if (!success) {
-                throw std::runtime_error("Attribute with same name already exists");
-            }
-            return NodeAttribute<T>{ownedPtr};
-        }
-
-        void detach(const std::string &name) {
-            auto it = find(name);
-            auto storage = it->second.get();
-            storage->invalidateStorage();
-            it->second.reset();
-            attrMap.erase(name);
-        }
-
-        template <typename T>
-        auto get(const std::string &name) {
-            auto it = find(name);
-            if (it->second.get()->getType() != typeid(T))
-                throw std::runtime_error("Type mismatch in nodeAttributes().get()");
-            return NodeAttribute<T>{std::static_pointer_cast<NodeAttributeStorage<T>>(it->second)};
-        }
-
-    }; // class NodeAttributeMap
-    NodeAttributeMap nodeAttributeMap;
+    AttributeMap<PerNode, Graph> nodeAttributeMap;
+    AttributeMap<PerEdge, Graph> edgeAttributeMap;
 
 public:
     auto &nodeAttributes() noexcept { return nodeAttributeMap; }
+    const auto &nodeAttributes() const noexcept { return nodeAttributeMap; }
+    auto &edgeAttributes() noexcept { return edgeAttributeMap; }
+    const auto &edgeAttributes() const noexcept { return edgeAttributeMap; }
 
     // wrap up some typed attributes for the cython interface:
     //
+
     auto attachNodeIntAttribute(const std::string &name) {
         nodeAttributes().theGraph = this;
         return nodeAttributes().attach<int>(name);
+    }
+
+    auto attachEdgeIntAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().attach<int>(name);
     }
 
     auto attachNodeDoubleAttribute(const std::string &name) {
@@ -501,9 +187,49 @@ public:
         return nodeAttributes().attach<double>(name);
     }
 
+    auto attachEdgeDoubleAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().attach<double>(name);
+    }
+
     auto attachNodeStringAttribute(const std::string &name) {
         nodeAttributes().theGraph = this;
         return nodeAttributes().attach<std::string>(name);
+    }
+
+    auto attachEdgeStringAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().attach<std::string>(name);
+    }
+
+    auto getNodeIntAttribute(const std::string &name) {
+        nodeAttributes().theGraph = this;
+        return nodeAttributes().get<int>(name);
+    }
+
+    auto getEdgeIntAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().get<int>(name);
+    }
+
+    auto getNodeDoubleAttribute(const std::string &name) {
+        nodeAttributes().theGraph = this;
+        return nodeAttributes().get<double>(name);
+    }
+
+    auto getEdgeDoubleAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().get<double>(name);
+    }
+
+    auto getNodeStringAttribute(const std::string &name) {
+        nodeAttributes().theGraph = this;
+        return nodeAttributes().get<std::string>(name);
+    }
+
+    auto getEdgeStringAttribute(const std::string &name) {
+        edgeAttributes().theGraph = this;
+        return edgeAttributes().get<std::string>(name);
     }
 
     void detachNodeAttribute(std::string const &name) {
@@ -511,11 +237,18 @@ public:
         nodeAttributes().detach(name);
     }
 
-    void detach(std::string const &name) { nodeAttributes().detach(name); }
+    void detachEdgeAttribute(std::string const &name) {
+        edgeAttributes().theGraph = this;
+        edgeAttributes().detach(name);
+    }
 
-    using NodeIntAttribute = NodeAttribute<int>;
-    using NodeDoubleAttribute = NodeAttribute<double>;
-    using NodeStringAttribute = NodeAttribute<std::string>;
+    using NodeIntAttribute = Attribute<PerNode, Graph, int, false>;
+    using NodeDoubleAttribute = Attribute<PerNode, Graph, double, false>;
+    using NodeStringAttribute = Attribute<PerNode, Graph, std::string, false>;
+
+    using EdgeIntAttribute = Attribute<PerEdge, Graph, int, false>;
+    using EdgeDoubleAttribute = Attribute<PerEdge, Graph, double, false>;
+    using EdgeStringAttribute = Attribute<PerEdge, Graph, std::string, false>;
 
 private:
     /**
@@ -792,499 +525,25 @@ private:
     }
 
 public:
-    /**
-     * Class to iterate over the nodes of a graph.
-     */
-    class NodeIterator {
-
-        const Graph *G;
-        node u;
-
-    public:
-        // The value type of the nodes (i.e. nodes). Returned by
-        // operator*().
-        using value_type = node;
-
-        // Reference to the value_type, required by STL.
-        using reference = value_type &;
-
-        // Pointer to the value_type, required by STL.
-        using pointer = value_type *;
-
-        // STL iterator category.
-        using iterator_category = std::forward_iterator_tag;
-
-        // Signed integer type of the result of subtracting two pointers,
-        // required by STL.
-        using difference_type = ptrdiff_t;
-
-        // Own type.
-        using self = NodeIterator;
-
-        NodeIterator(const Graph *G, node u) : G(G), u(u) {
-            if (!G->hasNode(u) && u < G->upperNodeIdBound()) {
-                ++(*this);
-            }
-        }
-
-        /**
-         * @brief WARNING: This constructor is required for Python and should not be used as the
-         * iterator is not initialized.
-         */
-        NodeIterator() : G(nullptr) {}
-
-        ~NodeIterator() = default;
-
-        NodeIterator &operator++() {
-            assert(u < G->upperNodeIdBound());
-            do {
-                ++u;
-            } while (!(G->hasNode(u) || u >= G->upperNodeIdBound()));
-            return *this;
-        }
-
-        NodeIterator operator++(int) {
-            const auto tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        NodeIterator operator--() {
-            assert(u);
-            do {
-                --u;
-            } while (!G->hasNode(u));
-            return *this;
-        }
-
-        NodeIterator operator--(int) {
-            const auto tmp = *this;
-            --(*this);
-            return tmp;
-        }
-
-        bool operator==(const NodeIterator &rhs) const noexcept { return u == rhs.u; }
-
-        bool operator!=(const NodeIterator &rhs) const noexcept { return !(*this == rhs); }
-
-        node operator*() const noexcept {
-            assert(u < G->upperNodeIdBound());
-            return u;
-        }
-    };
-
-    /**
-     * Wrapper class to iterate over a range of the nodes of a graph.
-     */
-    class NodeRange {
-
-        const Graph *G;
-
-    public:
-        NodeRange(const Graph &G) : G(&G) {}
-
-        NodeRange() : G(nullptr){};
-
-        ~NodeRange() = default;
-
-        NodeIterator begin() const noexcept {
-            assert(G);
-            return NodeIterator(G, node{0});
-        }
-
-        NodeIterator end() const noexcept {
-            assert(G);
-            return NodeIterator(G, G->upperNodeIdBound());
-        }
-    };
-
-    // Necessary for friendship with EdgeIteratorBase.
-    class EdgeIterator;
-    class EdgeWeightIterator;
-
-    class EdgeIteratorBase {
-        friend class EdgeIterator;
-        friend class EdgeWeightIterator;
-
-        const Graph *G;
-        NodeIterator nodeIter;
-        index i;
-
-        bool validEdge() const noexcept {
-            return G->isDirected() || (*nodeIter <= G->outEdges[*nodeIter][i]);
-        }
-
-        void nextEdge() {
-            do {
-                if (++i >= G->degree(*nodeIter)) {
-                    i = 0;
-                    do {
-                        assert(nodeIter != G->nodeRange().end());
-                        ++nodeIter;
-                        if (nodeIter == G->nodeRange().end()) {
-                            return;
-                        }
-                    } while (!G->degree(*nodeIter));
-                }
-            } while (!validEdge());
-        }
-
-        void prevEdge() {
-            do {
-                if (!i) {
-                    do {
-                        assert(nodeIter != G->nodeRange().begin());
-                        --nodeIter;
-                    } while (!G->degree(*nodeIter));
-
-                    i = G->degree(*nodeIter);
-                }
-                --i;
-            } while (!validEdge());
-        }
-
-        EdgeIteratorBase(const Graph *G, NodeIterator nodeIter)
-            : G(G), nodeIter(nodeIter), i(index{0}) {
-            if (nodeIter != G->nodeRange().end() && !G->degree(*nodeIter)) {
-                nextEdge();
-            }
-        }
-
-        /**
-         * @brief WARNING: This constructor is required for Python and should not be used as the
-         * iterator is not initialized.
-         */
-        EdgeIteratorBase() : G(nullptr) {}
-
-        virtual ~EdgeIteratorBase() = default;
-
-        bool operator==(const EdgeIteratorBase &rhs) const noexcept {
-            return nodeIter == rhs.nodeIter && i == rhs.i;
-        }
-
-        bool operator!=(const EdgeIteratorBase &rhs) const noexcept { return !(*this == rhs); }
-    };
-
-    /**
-     * Class to iterate over the edges of the graph. If the graph is undirected, operator*()
-     * returns the edges (u, v) s.t. u <= v.
-     */
-    class EdgeIterator : public EdgeIteratorBase {
-
-    public:
-        // The value type of the edges (i.e. a pair). Returned by operator*().
-        using value_type = Edge;
-
-        // Reference to the value_type, required by STL.
-        using reference = value_type &;
-
-        // Pointer to the value_type, required by STL.
-        using pointer = value_type *;
-
-        // STL iterator category.
-        using iterator_category = std::forward_iterator_tag;
-
-        // Signed integer type of the result of subtracting two pointers,
-        // required by STL.
-        using difference_type = ptrdiff_t;
-
-        // Own type.
-        using self = EdgeIterator;
-
-        EdgeIterator(const Graph *G, NodeIterator nodeIter) : EdgeIteratorBase(G, nodeIter) {}
-
-        EdgeIterator() : EdgeIteratorBase() {}
-
-        bool operator==(const EdgeIterator &rhs) const noexcept {
-            return this->EdgeIteratorBase::operator==(static_cast<EdgeIteratorBase>(rhs));
-        }
-
-        bool operator!=(const EdgeIterator &rhs) const noexcept { return !(*this == rhs); }
-
-        Edge operator*() const noexcept {
-            assert(nodeIter != G->nodeRange().end());
-            return Edge(*nodeIter, G->outEdges[*nodeIter][i]);
-        }
-
-        EdgeIterator &operator++() {
-            nextEdge();
-            return *this;
-        }
-
-        EdgeIterator operator++(int) {
-            const auto tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        EdgeIterator operator--() {
-            prevEdge();
-            return *this;
-        }
-
-        EdgeIterator operator--(int) {
-            const auto tmp = *this;
-            --(*this);
-            return tmp;
-        }
-    };
-
-    /**
-     * Class to iterate over the edges of the graph and their weights. If the graph is undirected,
-     * operator*() returns a WeightedEdge struct with u <= v.
-     */
-    class EdgeWeightIterator : public EdgeIteratorBase {
-    public:
-        // The value type of the edges and their weights (i.e. WeightedEdge). Returned by
-        // operator*().
-        using value_type = WeightedEdge;
-
-        // Reference to the value_type, required by STL.
-        using reference = value_type &;
-
-        // Pointer to the value_type, required by STL.
-        using pointer = value_type *;
-
-        // STL iterator category.
-        using iterator_category = std::forward_iterator_tag;
-
-        // Signed integer type of the result of subtracting two pointers,
-        // required by STL.
-        using difference_type = ptrdiff_t;
-
-        // Own type.
-        using self = EdgeWeightIterator;
-
-        EdgeWeightIterator(const Graph *G, NodeIterator nodeIter) : EdgeIteratorBase(G, nodeIter) {}
-
-        /**
-         * @brief WARNING: This constructor is required for Python and should not be used as the
-         * iterator is not initialized.
-         */
-        EdgeWeightIterator() : EdgeIteratorBase() {}
-
-        bool operator==(const EdgeWeightIterator &rhs) const noexcept {
-            return this->EdgeIteratorBase::operator==(static_cast<EdgeIteratorBase>(rhs));
-        }
-
-        bool operator!=(const EdgeWeightIterator &rhs) const noexcept { return !(*this == rhs); }
-
-        EdgeWeightIterator &operator++() {
-            nextEdge();
-            return *this;
-        }
-
-        EdgeWeightIterator operator++(int) {
-            const auto tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        EdgeWeightIterator operator--() {
-            prevEdge();
-            return *this;
-        }
-
-        EdgeWeightIterator operator--(int) {
-            const auto tmp = *this;
-            --(*this);
-            return tmp;
-        }
-
-        WeightedEdge operator*() const noexcept {
-            assert(nodeIter != G->nodeRange().end());
-            return WeightedEdge(*nodeIter, G->outEdges[*nodeIter][i],
-                                G->isWeighted() ? G->outEdgeWeights[*nodeIter][i] : 1);
-        }
-    };
-
-    /**
-     * Wrapper class to iterate over a range of the edges of a graph.
-     */
-    class EdgeRange {
-
-        const Graph *G;
-
-    public:
-        EdgeRange(const Graph &G) : G(&G) {}
-
-        EdgeRange() : G(nullptr){};
-
-        ~EdgeRange() = default;
-
-        EdgeIterator begin() const {
-            assert(G);
-            return EdgeIterator(G, G->nodeRange().begin());
-        }
-
-        EdgeIterator end() const {
-            assert(G);
-            return EdgeIterator(G, G->nodeRange().end());
-        }
-    };
-
-    /**
-     * Wrapper class to iterate over a range of the edges of a graph and their weights.
-     */
-    class EdgeWeightRange {
-
-        const Graph *G;
-
-    public:
-        EdgeWeightRange(const Graph &G) : G(&G) {}
-
-        EdgeWeightRange() : G(nullptr){};
-
-        ~EdgeWeightRange() = default;
-
-        EdgeWeightIterator begin() const {
-            assert(G);
-            return EdgeWeightIterator(G, G->nodeRange().begin());
-        }
-
-        EdgeWeightIterator end() const {
-            assert(G);
-            return EdgeWeightIterator(G, G->nodeRange().end());
-        }
-    };
-
-    /**
-     * Class to iterate over the in/out neighbors of a node.
-     */
-    class NeighborIterator {
-
-        std::vector<node>::const_iterator nIter;
-
-    public:
-        // The value type of the neighbors (i.e. nodes). Returned by
-        // operator*().
-        using value_type = node;
-
-        // Reference to the value_type, required by STL.
-        using reference = value_type &;
-
-        // Pointer to the value_type, required by STL.
-        using pointer = value_type *;
-
-        // STL iterator category.
-        using iterator_category = std::forward_iterator_tag;
-
-        // Signed integer type of the result of subtracting two pointers,
-        // required by STL.
-        using difference_type = ptrdiff_t;
-
-        // Own type.
-        using self = NeighborIterator;
-
-        NeighborIterator(std::vector<node>::const_iterator nodesIter) : nIter(nodesIter) {}
-
-        /**
-         * @brief WARNING: This contructor is required for Python and should not be used as the
-         * iterator is not initialized.
-         */
-        NeighborIterator() {}
-
-        NeighborIterator &operator++() {
-            ++nIter;
-            return *this;
-        }
-
-        NeighborIterator operator++(int) {
-            const auto tmp = *this;
-            ++nIter;
-            return tmp;
-        }
-
-        NeighborIterator operator--() {
-            const auto tmp = *this;
-            --nIter;
-            return tmp;
-        }
-
-        NeighborIterator operator--(int) {
-            --nIter;
-            return *this;
-        }
-
-        bool operator==(const NeighborIterator &rhs) const { return nIter == rhs.nIter; }
-
-        bool operator!=(const NeighborIterator &rhs) const { return !(nIter == rhs.nIter); }
-
-        node operator*() const { return *nIter; }
-    };
-
-    /**
-     * Class to iterate over the in/out neighbors of a node including the edge
-     * weights. Values are std::pair<node, edgeweight>.
-     */
-    class NeighborWeightIterator {
-
-        std::vector<node>::const_iterator nIter;
-        std::vector<edgeweight>::const_iterator wIter;
-
-    public:
-        // The value type of the neighbors (i.e. nodes). Returned by
-        // operator*().
-        using value_type = std::pair<node, edgeweight>;
-
-        // Reference to the value_type, required by STL.
-        using reference = value_type &;
-
-        // Pointer to the value_type, required by STL.
-        using pointer = value_type *;
-
-        // STL iterator category.
-        using iterator_category = std::forward_iterator_tag;
-
-        // Signed integer type of the result of subtracting two pointers,
-        // required by STL.
-        using difference_type = ptrdiff_t;
-
-        // Own type.
-        using self = NeighborWeightIterator;
-
-        NeighborWeightIterator(std::vector<node>::const_iterator nodesIter,
-                               std::vector<edgeweight>::const_iterator weightIter)
-            : nIter(nodesIter), wIter(weightIter) {}
-
-        /**
-         * @brief WARNING: This contructor is required for Python and should not be used as the
-         * iterator is not initialized.
-         */
-        NeighborWeightIterator() {}
-
-        NeighborWeightIterator &operator++() {
-            ++nIter;
-            ++wIter;
-            return *this;
-        }
-
-        NeighborWeightIterator operator++(int) {
-            const auto tmp = *this;
-            ++(*this);
-            return tmp;
-        }
-
-        NeighborWeightIterator operator--() {
-            --nIter;
-            --wIter;
-            return *this;
-        }
-
-        NeighborWeightIterator operator--(int) {
-            const auto tmp = *this;
-            --(*this);
-            return tmp;
-        }
-
-        bool operator==(const NeighborWeightIterator &rhs) const {
-            return nIter == rhs.nIter && wIter == rhs.wIter;
-        }
-
-        bool operator!=(const NeighborWeightIterator &rhs) const { return !(*this == rhs); }
-
-        std::pair<node, edgeweight> operator*() const { return std::make_pair(*nIter, *wIter); }
-    };
+    // For support of API: NetworKit::Graph::NodeIterator
+    using NodeIterator = NodeIteratorBase<Graph>;
+    // For support of API: NetworKit::Graph::NodeRange
+    using NodeRange = NodeRangeBase<Graph>;
+
+    // For support of API: NetworKit::Graph:EdgeIterator
+    using EdgeIterator = EdgeTypeIterator<Graph, Edge>;
+    // For support of API: NetworKit::Graph:EdgeWeightIterator
+    using EdgeWeightIterator = EdgeTypeIterator<Graph, WeightedEdge>;
+    // For support of API: NetworKit::Graph:EdgeRange
+    using EdgeRange = EdgeTypeRange<Graph, Edge>;
+    // For support of API: NetworKit::Graph:EdgeWeightRange
+    using EdgeWeightRange = EdgeTypeRange<Graph, WeightedEdge>;
+
+    // For support of API: NetworKit::Graph::NeighborIterator;
+    using NeighborIterator = NeighborIteratorBase<std::vector<node>>;
+    // For support of API: NetworKit::Graph::NeighborIterator;
+    using NeighborWeightIterator =
+        NeighborWeightIteratorBase<std::vector<node>, std::vector<edgeweight>>;
 
     /**
      * Wrapper class to iterate over a range of the neighbors of a node within
@@ -1293,7 +552,7 @@ public:
     template <bool InEdges = false>
     class NeighborRange {
         const Graph *G;
-        node u;
+        node u{none};
 
     public:
         NeighborRange(const Graph &G, node u) : G(&G), u(u) { assert(G.hasNode(u)); };
@@ -1325,7 +584,7 @@ public:
     class NeighborWeightRange {
 
         const Graph *G;
-        node u;
+        node u{none};
 
     public:
         NeighborWeightRange(const Graph &G, node u) : G(&G), u(u) { assert(G.hasNode(u)); };
@@ -1374,14 +633,17 @@ public:
           // let the following be empty for the start, we fill them later
           inEdges(0), outEdges(0), inEdgeWeights(0), outEdgeWeights(0), inEdgeIds(0), outEdgeIds(0),
 
-          // empty node attribute map as last member for this graph
-          nodeAttributeMap(this) {
+          // copy node attribute map
+          nodeAttributeMap(G.nodeAttributeMap, this),
+          // fill this later
+          edgeAttributeMap(this) {
 
         if (G.isDirected() == directed) {
             // G.inEdges might be empty (if G is undirected), but
             // that's fine
             inEdges = G.inEdges;
             outEdges = G.outEdges;
+            edgeAttributeMap = AttributeMap(G.edgeAttributeMap, this);
 
             // copy weights if needed
             if (weighted) {
@@ -1412,6 +674,12 @@ public:
         } else if (G.isDirected()) {
             // G is directed, but we want an undirected graph
             // so we need to combine the out and in stuff for every node
+
+            // for edge attributes, it is not well defined how they should be comined - we will skip
+            // that step and warn the user
+            WARN("Edge attributes are not preserved when converting from directed to undirected "
+                 "graphs. The resulting graph will have empty edge attributes.");
+
             outEdges.resize(z);
             if (weighted)
                 outEdgeWeights.resize(z);
@@ -1480,6 +748,11 @@ public:
         } else {
             // G is not directed, but this copy should be
             // generally we can can copy G.out stuff into our in stuff
+
+            // for edge attributes, we currently do not have a way to iterate them for duplication
+            WARN("Edge attributes are currently not preserved when converting from undirected to "
+                 "directed graphs.");
+
             inEdges = G.outEdges;
             outEdges = G.outEdges;
             if (weighted) {
@@ -1521,19 +794,91 @@ public:
      * Create a graph as copy of @a other.
      * @param other The graph to copy.
      */
-    Graph(const Graph &other) = default;
+    Graph(const Graph &other)
+        : n(other.n), m(other.m), storedNumberOfSelfLoops(other.storedNumberOfSelfLoops),
+          z(other.z), omega(other.omega), t(other.t), weighted(other.weighted),
+          directed(other.directed), edgesIndexed(other.edgesIndexed), deletedID(other.deletedID),
+          exists(other.exists), inEdges(other.inEdges), outEdges(other.outEdges),
+          inEdgeWeights(other.inEdgeWeights), outEdgeWeights(other.outEdgeWeights),
+          inEdgeIds(other.inEdgeIds), outEdgeIds(other.outEdgeIds),
+          // call special constructors to copy attribute maps
+          nodeAttributeMap(other.nodeAttributeMap, this),
+          edgeAttributeMap(other.edgeAttributeMap, this){};
 
-    /** Default move constructor */
-    Graph(Graph &&other) noexcept = default;
+    /** move constructor */
+    Graph(Graph &&other) noexcept
+        : n(other.n), m(other.m), storedNumberOfSelfLoops(other.storedNumberOfSelfLoops),
+          z(other.z), omega(other.omega), t(other.t), weighted(other.weighted),
+          directed(other.directed), edgesIndexed(other.edgesIndexed), deletedID(other.deletedID),
+          exists(std::move(other.exists)), inEdges(std::move(other.inEdges)),
+          outEdges(std::move(other.outEdges)), inEdgeWeights(std::move(other.inEdgeWeights)),
+          outEdgeWeights(std::move(other.outEdgeWeights)), inEdgeIds(std::move(other.inEdgeIds)),
+          outEdgeIds(std::move(other.outEdgeIds)),
+          nodeAttributeMap(std::move(other.nodeAttributeMap)),
+          edgeAttributeMap(std::move(other.edgeAttributeMap)) {
+        // attributes: set graph pointer to this new graph
+        nodeAttributeMap.theGraph = this;
+        edgeAttributeMap.theGraph = this;
+    };
 
     /** Default destructor */
     ~Graph() = default;
 
-    /** Default move assignment operator */
-    Graph &operator=(Graph &&other) noexcept = default;
+    /** move assignment operator */
+    Graph &operator=(Graph &&other) noexcept {
+        std::swap(n, other.n);
+        std::swap(m, other.m);
+        std::swap(storedNumberOfSelfLoops, other.storedNumberOfSelfLoops);
+        std::swap(z, other.z);
+        std::swap(omega, other.omega);
+        std::swap(t, other.t);
+        std::swap(weighted, other.weighted);
+        std::swap(directed, other.directed);
+        std::swap(edgesIndexed, other.edgesIndexed);
+        std::swap(exists, other.exists);
+        std::swap(inEdges, other.inEdges);
+        std::swap(outEdges, other.outEdges);
+        std::swap(inEdgeWeights, other.inEdgeWeights);
+        std::swap(outEdgeWeights, other.outEdgeWeights);
+        std::swap(inEdgeIds, other.inEdgeIds);
+        std::swap(outEdgeIds, other.outEdgeIds);
+        std::swap(deletedID, other.deletedID);
 
-    /** Default copy assignment operator */
-    Graph &operator=(const Graph &other) = default;
+        // attributes: set graph pointer to this new graph
+        std::swap(nodeAttributeMap, other.nodeAttributeMap);
+        std::swap(edgeAttributeMap, other.edgeAttributeMap);
+        nodeAttributeMap.theGraph = this;
+        edgeAttributeMap.theGraph = this;
+
+        return *this;
+    };
+
+    /** copy assignment operator */
+    Graph &operator=(const Graph &other) {
+        n = other.n;
+        m = other.m;
+        storedNumberOfSelfLoops = other.storedNumberOfSelfLoops;
+        z = other.z;
+        omega = other.omega;
+        t = other.t;
+        weighted = other.weighted;
+        directed = other.directed;
+        edgesIndexed = other.edgesIndexed;
+        exists = other.exists;
+        inEdges = other.inEdges;
+        outEdges = other.outEdges;
+        inEdgeWeights = other.inEdgeWeights;
+        outEdgeWeights = other.outEdgeWeights;
+        inEdgeIds = other.inEdgeIds;
+        outEdgeIds = other.outEdgeIds;
+        deletedID = other.deletedID;
+
+        // call special constructors to copy attribute maps
+        nodeAttributeMap = AttributeMap(other.nodeAttributeMap, this);
+        edgeAttributeMap = AttributeMap(other.edgeAttributeMap, this);
+
+        return *this;
+    };
 
     /**
      * Reserves memory in the node's edge containers for undirected graphs.
@@ -1583,7 +928,11 @@ public:
     /** EDGE IDS **/
 
     /**
-     * Initially assign integer edge identifiers.
+     * Initially assign integer edge identifiers. Edge ids are an optional feature.
+     * They are used by some algorithms and can also be useful to track edges. Given a graph and
+     * generated edge ids, the iterators forEdges, forNeighborsOf, etc. iterate over edges in the
+     * order of their edge ids. Once the graph is changed, the iterators will no longer guarantee
+     * this order. Use indexEdges(true) to re-index edges after modifying the graph.
      *
      * @param force Force re-indexing of edges even if they have already been
      * indexed
@@ -1603,6 +952,30 @@ public:
     edgeid edgeId(node u, node v) const;
 
     /**
+     * Get the Edge (u,v) of the given id. (inverse to edgeId)
+     * @note Time complexity of this function is O(n).
+     */
+    std::pair<node, node> edgeById(index id) const {
+        std::pair<node, node> result{none, none};
+        bool found = false;
+
+        forNodesWhile([&] { return !found; },
+                      [&](node u) {
+                          forNeighborsOf(u, [&](node v) {
+                              if (!this->isDirected() && v < u)
+                                  return;
+                              auto uvId = edgeId(u, v);
+                              if (uvId == id) {
+                                  found = true;
+                                  result = std::make_pair(u, v);
+                              }
+                          });
+                      });
+
+        return result;
+    }
+
+    /**
      * Get an upper bound for the edge ids in the graph.
      * @return An upper bound for the edge ids.
      */
@@ -1618,10 +991,22 @@ public:
     void shrinkToFit();
 
     /**
+     * DEPRECATED: this function will no longer be supported in later releases.
      * Compacts the adjacency arrays by re-using no longer needed slots from
      * deleted edges.
      */
-    void compactEdges();
+    void TLX_DEPRECATED(compactEdges());
+
+    /**
+     * Sorts the outgoing neighbors of a given node according to a user-defined comparison function.
+     *
+     * @param u The node whose outgoing neighbors will be sorted.
+     * @param lambda A binary predicate used to compare two neighbors. The predicate should
+     *               take two nodes as arguments and return true if the first node should
+     *               precede the second in the sorted order.
+     */
+    template <typename Lambda>
+    void sortNeighbors(node u, Lambda lambda);
 
     /**
      * Sorts the adjacency arrays by node id. While the running time is linear
@@ -1678,7 +1063,7 @@ public:
      *
      * Incoming as well as outgoing edges will be removed.
      *
-     * @param u Node.
+     * @param v Node.
      */
     void removeNode(node v);
 
@@ -1686,7 +1071,7 @@ public:
      * Removes out-going edges from node @u. If the graph is weighted and/or has edge ids, weights
      * and/or edge ids will also be removed.
      *
-     * @param node u Node.
+     * @param u Node.
      */
     void removePartialOutEdges(Unsafe, node u) {
         assert(hasNode(u));
@@ -1703,7 +1088,7 @@ public:
      * Removes in-going edges to node @u. If the graph is weighted and/or has edge ids, weights
      * and/or edge ids will also be removed.
      *
-     * @param node u Node.
+     * @param u Node.
      */
     void removePartialInEdges(Unsafe, node u) {
         assert(hasNode(u));
@@ -1736,14 +1121,18 @@ public:
     void restoreNode(node v);
 
     /** NODE PROPERTIES **/
-
     /**
      * Returns the number of outgoing neighbors of @a v.
      *
      * @param v Node.
      * @return The number of outgoing neighbors.
+     * @note The existence of the node is not checked. Calling this function with a non-existing
+     * node results in a segmentation fault. Node existence can be checked by calling hasNode(u).
      */
-    count degree(node v) const { return outEdges[v].size(); }
+    count degree(node v) const {
+        assert(hasNode(v));
+        return outEdges[v].size();
+    }
 
     /**
      * Get the number of incoming neighbors of @a v.
@@ -1751,16 +1140,23 @@ public:
      * @param v Node.
      * @return The number of incoming neighbors.
      * @note If the graph is not directed, the outgoing degree is returned.
+     * @note The existence of the node is not checked. Calling this function with a non-existing
+     * node results in a segmentation fault. Node existence can be checked by calling hasNode(u).
      */
-    count degreeIn(node v) const { return directed ? inEdges[v].size() : outEdges[v].size(); }
+    count degreeIn(node v) const {
+        assert(hasNode(v));
+        return directed ? inEdges[v].size() : outEdges[v].size();
+    }
 
     /**
      * Get the number of outgoing neighbors of @a v.
      *
      * @param v Node.
      * @return The number of outgoing neighbors.
+     * @note The existence of the node is not checked. Calling this function with a non-existing
+     * node results in a segmentation fault. Node existence can be checked by calling hasNode(u).
      */
-    count degreeOut(node v) const { return outEdges[v].size(); }
+    count degreeOut(node v) const { return degree(v); }
 
     /**
      * Check whether @a v is isolated, i.e. degree is 0.
@@ -1805,7 +1201,7 @@ public:
      * to O(max(deg(u), deg(v))).
      * @param u Endpoint of edge.
      * @param v Endpoint of edge.
-     * @param weight Optional edge weight.
+     * @param ew Optional edge weight.
      * @param checkMultiEdge If true, this enables a check for a possible multi-edge.
      * @return @c true if edge has been added, false otherwise (in case checkMultiEdge is set to
      * true and the new edge would have been a multi-edge.)
@@ -1822,10 +1218,10 @@ public:
      * to O(max(deg(u), deg(v))).
      * @param u Endpoint of edge.
      * @param v Endpoint of edge.
-     * @param weight Optional edge weight.
+     * @param ew Optional edge weight.
      * @param ew Optional edge weight.
      * @param index Optional edge index.
-     * @param checkMultiEdge If true, this enables a check for a possible multi-edge.
+     * @param checkForMultiEdges If true, this enables a check for a possible multi-edge.
      * @return @c true if edge has been added, false otherwise (in case checkMultiEdge is set to
      * true and the new edge would have been a multi-edge.)
      */
@@ -1844,7 +1240,7 @@ public:
      * @param v Endpoint of edge.
      * @param ew Optional edge weight.
      * @param index Optional edge index.
-     * @param checkMultiEdge If true, this enables a check for a possible multi-edge.
+     * @param checkForMultiEdges If true, this enables a check for a possible multi-edge.
      * @return @c true if edge has been added, false otherwise (in case checkMultiEdge is set to
      * true and the new edge would have been a multi-edge.)
      */
@@ -1863,7 +1259,7 @@ public:
      * @param v Endpoint of edge.
      * @param ew Optional edge weight.
      * @param index Optional edge index.
-     * @param checkMultiEdge If true, this enables a check for a possible multi-edge.
+     * @param checkForMultiEdges If true, this enables a check for a possible multi-edge.
      * @return @c true if edge has been added, false otherwise (in case checkMultiEdge is set to
      * true and the new edge would have been a multi-edge.)
      */
@@ -1871,6 +1267,33 @@ public:
                            uint64_t index = 0, bool checkForMultiEdges = false);
 
     /**
+     * If set to true, the ingoing and outgoing adjacency vectors will
+     * automatically be updated to maintain a sorting (if it existed before) by performing up to n-1
+     * swaps. If the user plans to remove multiple edges, better set it to false and call
+     * sortEdges() afterwards to avoid redundant swaps. Default = true.
+     */
+    void setKeepEdgesSorted(bool sorted = true) { maintainSortedEdges = sorted; }
+
+    /**
+     * If set to true, the EdgeIDs will automatically be adjusted,
+     * so that no gaps in between IDs exist. If the user plans to remove multiple edges, better set
+     * it to false and call indexEdges(force=true) afterwards to avoid redundant re-indexing.
+     * Default = true.
+     */
+    void setMaintainCompactEdges(bool compact = true) { maintainCompactEdges = compact; }
+
+    /**
+     * Returns true if edges are currently being sorted when removeEdge() is called.
+     */
+    bool getKeepEdgesSorted() const noexcept { return maintainSortedEdges; }
+
+    /*
+     * Returns true if edges are currently being compacted when removeEdge() is called.
+     */
+    bool getMaintainCompactEdges() const noexcept { return maintainCompactEdges; }
+
+    /**
+     *
      * Removes the undirected edge {@a u,@a v}.
      * @param u Endpoint of edge.
      * @param v Endpoint of edge.
@@ -2023,7 +1446,7 @@ public:
      *
      * @param[in]	u	endpoint of edge
      * @param[in]	v	endpoint of edge
-     * @param[in]	weight	edge weight
+     * @param[in]	ew	edge weight
      */
     void setWeight(node u, node v, edgeweight ew);
 
@@ -2032,9 +1455,18 @@ public:
      *
      * @param[in]	u	endpoint of edge
      * @param[in]	i	index of the nexight
-     * @param[in]	weight	edge weight
+     * @param[in]	ew	edge weight
      */
     void setWeightAtIthNeighbor(Unsafe, node u, index i, edgeweight ew);
+
+    /**
+     * Set the weight to the i-th incoming neighbour of u.
+     *
+     * @param[in]	u	endpoint of edge
+     * @param[in]	i	index of the nexight
+     * @param[in]	ew	edge weight
+     */
+    void setWeightAtIthInNeighbor(Unsafe, node u, index i, edgeweight ew);
 
     /**
      * Increase the weight of an edge. If the edge does not exist,
@@ -2042,7 +1474,7 @@ public:
      *
      * @param[in]	u	endpoint of edge
      * @param[in]	v	endpoint of edge
-     * @param[in]	weight	edge weight
+     * @param[in]	ew	edge weight
      */
     void increaseWeight(node u, node v, edgeweight ew);
 
@@ -2053,6 +1485,28 @@ public:
      * @return The sum of all edge weights.
      */
     edgeweight totalEdgeWeight() const noexcept;
+
+    /**
+     * Return the i-th (outgoing) neighbor of @a u.
+     *
+     * @param u Node.
+     * @param i index; should be in [0, degreeOut(u))
+     * @return @a i-th (outgoing) neighbor of @a u, or @c none if no such
+     * neighbor exists.
+     */
+    node getIthNeighbor(Unsafe, node u, index i) const { return outEdges[u][i]; }
+
+    /**
+     * Return the weight to the i-th (outgoing) neighbor of @a u.
+     *
+     * @param u Node.
+     * @param i index; should be in [0, degreeOut(u))
+     * @return @a edge weight to the i-th (outgoing) neighbor of @a u, or @c +inf if no such
+     * neighbor exists.
+     */
+    edgeweight getIthNeighborWeight(Unsafe, node u, index i) const {
+        return isWeighted() ? outEdgeWeights[u][i] : defaultEdgeWeight;
+    }
 
     /**
      * Get an iterable range over the nodes of the graph.
@@ -2079,7 +1533,7 @@ public:
      * Get an iterable range over the neighbors of @a.
      *
      * @param u Node.
-     * @return Iterator range over the neighbors of @a.
+     * @return Iterator range over the neighbors of @a u.
      */
     NeighborRange<false> neighborRange(node u) const {
         assert(exists[u]);
@@ -2091,7 +1545,7 @@ public:
      * weights.
      *
      * @param u Node.
-     * @return Iterator range over pairs of neighbors of @a and corresponding
+     * @return Iterator range over pairs of neighbors of @a u and corresponding
      * edge weights.
      */
     NeighborWeightRange<false> weightNeighborRange(node u) const {
@@ -2104,7 +1558,7 @@ public:
      * Get an iterable range over the in-neighbors of @a.
      *
      * @param u Node.
-     * @return Iterator range over pairs of in-neighbors of @a.
+     * @return Iterator range over pairs of in-neighbors of @a u.
      */
     NeighborRange<true> inNeighborRange(node u) const {
         assert(isDirected());
@@ -2117,7 +1571,7 @@ public:
      * edge weights.
      *
      * @param u Node.
-     * @return Iterator range over pairs of in-neighbors of @a and corresponding
+     * @return Iterator range over pairs of in-neighbors of @a u and corresponding
      * edge weights.
      */
     NeighborWeightRange<true> weightInNeighborRange(node u) const {
@@ -2147,6 +1601,20 @@ public:
         if (!hasNode(u) || i >= outEdges[u].size())
             return none;
         return outEdges[u][i];
+    }
+
+    /**
+     * Return the i-th (incoming) neighbor of @a u.
+     *
+     * @param u Node.
+     * @param i index; should be in [0, degreeIn(u))
+     * @return @a i-th (incoming) neighbor of @a u, or @c none if no such
+     * neighbor exists.
+     */
+    node getIthInNeighbor(node u, index i) const {
+        if (!hasNode(u) || i >= inEdges[u].size())
+            return none;
+        return inEdges[u][i];
     }
 
     /**
@@ -2279,6 +1747,11 @@ public:
      * Iterate over all edges of the const graph and call @a handle (lambda
      * closure).
      *
+     * This iterator can be used to visit each edge in the order of their edge ids.
+     * For this to work, indexEdges() must have been called once before.
+     * If the graph has changed since the last call to indexEdges(), the edge ids may not be in the
+     * correct order. In this case, calling indexEdges(true) again will restore the correct order.
+     *
      * @param handle Takes parameters <code>(node, node)</code>, <code>(node,
      * node, edgweight)</code>, <code>(node, node, edgeid)</code> or
      * <code>(node, node, edgeweight, edgeid)</code>.
@@ -2303,6 +1776,11 @@ public:
      * Iterate over all neighbors of a node and call @a handle (lamdba
      * closure).
      *
+     * This iterator can be used to visit each edge in the order of their edge ids.
+     * For this to work, indexEdges() must have been called once before.
+     * If the graph has changed since the last call to indexEdges(), the edge ids may not be in the
+     * correct order. In this case, calling indexEdges(true) again will restore the correct order.
+     *
      * @param u Node.
      * @param handle Takes parameter <code>(node)</code> or <code>(node,
      * edgeweight)</code> which is a neighbor of @a u.
@@ -2316,6 +1794,11 @@ public:
     /**
      * Iterate over all incident edges of a node and call @a handle (lamdba
      * closure).
+     *
+     * This iterator can be used to visit each edge in the order of their edge ids.
+     * For this to work, indexEdges() must have been called once before.
+     * If the graph has changed since the last call to indexEdges(), the edge ids may not be in the
+     * correct order. In this case, calling indexEdges(true) again will restore the correct order.
      *
      * @param u Node.
      * @param handle Takes parameters <code>(node, node)</code>, <code>(node,
@@ -2331,13 +1814,25 @@ public:
     /**
      * Iterate over all neighbors of a node and call handler (lamdba closure).
      * For directed graphs only incoming edges from u are considered.
+     *
+     * This iterator can be used to visit each edge in the order of their edge ids.
+     * For this to work, indexEdges() must have been called once before.
+     * If the graph has changed since the last call to indexEdges(), the edge ids may not be in the
+     * correct order. In this case, calling indexEdges(true) again will restore the correct order.
+     *
      */
     template <typename L>
     void forInNeighborsOf(node u, L handle) const;
 
     /**
-     * Iterate over all incoming edges of a node and call handler (lamdba
+     * Iterate over all incoming edges of a node and call handler (lambda
      * closure).
+     *
+     * This iterator can be used to visit each edge in the order of their edge ids.
+     * For this to work, indexEdges() must have been called once before.
+     * If the graph has changed since the last call to indexEdges(), the edge ids may not be in the
+     * correct order. In this case, calling indexEdges(true) again will restore the correct order.
+     *
      * @note For undirected graphs all edges incident to u are also incoming
      * edges.
      *
@@ -2401,7 +1896,7 @@ void Graph::forNodesInRandomOrder(L handle) const {
     std::vector<node> randVec;
     randVec.reserve(numberOfNodes());
     forNodes([&](node u) { randVec.push_back(u); });
-    std::shuffle(randVec.begin(), randVec.end(), Aux::Random::getURNG());
+    std::ranges::shuffle(randVec, Aux::Random::getURNG());
     for (node v : randVec) {
         handle(v);
     }
@@ -2529,19 +2024,15 @@ inline void Graph::forInEdgesOfImpl(node u, L handle) const {
         for (index i = 0; i < inEdges[u].size(); i++) {
             node v = inEdges[u][i];
 
-            if (useEdgeInIteration<true>(u, v)) {
-                edgeLambda<L>(handle, u, v, getInEdgeWeight<hasWeights>(u, i),
-                              getInEdgeId<graphHasEdgeIds>(u, i));
-            }
+            edgeLambda<L>(handle, u, v, getInEdgeWeight<hasWeights>(u, i),
+                          getInEdgeId<graphHasEdgeIds>(u, i));
         }
     } else {
         for (index i = 0; i < outEdges[u].size(); ++i) {
             node v = outEdges[u][i];
 
-            if (useEdgeInIteration<true>(u, v)) {
-                edgeLambda<L>(handle, u, v, getOutEdgeWeight<hasWeights>(u, i),
-                              getOutEdgeId<graphHasEdgeIds>(u, i));
-            }
+            edgeLambda<L>(handle, u, v, getOutEdgeWeight<hasWeights>(u, i),
+                          getOutEdgeId<graphHasEdgeIds>(u, i));
         }
     }
 }
@@ -2816,6 +2307,51 @@ std::pair<count, count> Graph::removeAdjacentEdges(node u, Condition condition, 
     }
 
     return {removedEdges, removedSelfLoops};
+}
+
+template <typename Lambda>
+void Graph::sortNeighbors(node u, Lambda lambda) {
+    if ((degreeIn(u) < 2) && (degree(u) < 2)) {
+        return;
+    }
+    // Sort the outEdge-Attributes
+    std::vector<index> outIndices(outEdges[u].size());
+    std::iota(outIndices.begin(), outIndices.end(), 0);
+    std::ranges::sort(outIndices,
+                      [&](index a, index b) { return lambda(outEdges[u][a], outEdges[u][b]); });
+
+    Aux::ArrayTools::applyPermutation(outEdges[u].begin(), outEdges[u].end(), outIndices.begin());
+
+    if (weighted) {
+        Aux::ArrayTools::applyPermutation(outEdgeWeights[u].begin(), outEdgeWeights[u].end(),
+                                          outIndices.begin());
+    }
+
+    if (edgesIndexed) {
+        Aux::ArrayTools::applyPermutation(outEdgeIds[u].begin(), outEdgeIds[u].end(),
+                                          outIndices.begin());
+    }
+
+    // For directed graphs we need to sort the inEdge-Attributes separately
+    if (directed) {
+        std::vector<index> inIndices(inEdges[u].size());
+        std::iota(inIndices.begin(), inIndices.end(), 0);
+
+        std::ranges::sort(inIndices,
+                          [&](index a, index b) { return lambda(inEdges[u][a], inEdges[u][b]); });
+
+        Aux::ArrayTools::applyPermutation(inEdges[u].begin(), inEdges[u].end(), inIndices.begin());
+
+        if (weighted) {
+            Aux::ArrayTools::applyPermutation(inEdgeWeights[u].begin(), inEdgeWeights[u].end(),
+                                              inIndices.begin());
+        }
+
+        if (edgesIndexed) {
+            Aux::ArrayTools::applyPermutation(inEdgeIds[u].begin(), inEdgeIds[u].end(),
+                                              inIndices.begin());
+        }
+    }
 }
 
 template <class Lambda>

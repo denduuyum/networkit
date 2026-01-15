@@ -9,6 +9,7 @@
 #include <ctime>
 #include <memory>
 #include <queue>
+#include <span>
 #include <unordered_set>
 
 #include <networkit/auxiliary/Log.hpp>
@@ -107,7 +108,7 @@ void DynBetweenness::increaseScore(std::vector<bool> &affected, node y, PrioQ &Q
                 }
                 if (!visited[w] && !affected[w] && w != y) {
                     TRACE("Inserting node ", w, " with new priority ", distances[w][y]);
-                    Q.push(std::make_pair(diameter + 1.0 - distances[w][y], w));
+                    Q.emplace(diameter + 1.0 - distances[w][y], w);
                     visited[w] = true;
                 }
             }
@@ -141,7 +142,7 @@ void DynBetweenness::decreaseScore(std::vector<bool> &affected, node y, PrioQ &Q
                 }
                 if (!visited[w] && !affected[w] && w != y) {
                     TRACE("Inserting node ", w, " with old priority ", distancesOld[w][y]);
-                    Q.push(std::make_pair(diameter + 1.0 - distancesOld[w][y], w));
+                    Q.emplace(diameter + 1.0 - distancesOld[w][y], w);
                     visited[w] = true;
                 }
             }
@@ -179,7 +180,7 @@ void DynBetweenness::update(GraphEvent event) {
         INFO("Phase 1. distances[", u, "][", v, "] = ", distances[u][v], ", and G.weight", u, ", ",
              v, " = ", G.weight(u, v));
         distances[u][v] = weightuv;
-        modified.push(std::make_pair(u, v));
+        modified.emplace(u, v);
         sigma[u][v] = 1;
         visited[u] = true;
         if (!G.isDirected()) {
@@ -225,8 +226,8 @@ void DynBetweenness::update(GraphEvent event) {
                 n_sources[y] = n_sources[Pred[y]];
                 visited[y] = true;
                 // since u is not in source, we insert it now
-                Qnew.push(std::make_pair(diameter + 1.0 - distances[u][y], u));
-                Qold.push(std::make_pair(diameter + 1.0 - distancesOld[u][y], u));
+                Qnew.emplace(diameter + 1.0 - distances[u][y], u);
+                Qold.emplace(diameter + 1.0 - distancesOld[u][y], u);
                 for (count c = 0; c < n_sources[y]; c++) {
                     node s = source_nodes[c];
                     if (s != u) {
@@ -239,27 +240,27 @@ void DynBetweenness::update(GraphEvent event) {
                             distances[y][s] = distances[s][y];
                             sigma[y][s] = sigma[s][y];
                         }
-                        modified.push(std::make_pair(s, y));
+                        modified.emplace(s, y);
                         affected[s] = true;
                         TRACE("Node ", y, ", Inserting node ", s, " with new priority ",
                               diameter + 1 - distances[s][y]);
                         TRACE("Node ", y, ", Inserting node ", s, " with old priority ",
                               diameter + 1 - distancesOld[s][y]);
-                        Qnew.push(std::make_pair(diameter + 1 - distances[s][y], s));
-                        Qold.push(std::make_pair(diameter + 1 - distancesOld[s][y], s));
+                        Qnew.emplace(diameter + 1 - distances[s][y], s);
+                        Qold.emplace(diameter + 1 - distancesOld[s][y], s);
                     } else if (distances[s][y] == distances[s][u] + weightuv + distances[v][y]) {
                         sigma[s][y] += sigma[s][u] * sigma[v][y];
                         if (!G.isDirected()) {
                             sigma[y][s] = sigma[s][y];
                         }
-                        modified.push(std::make_pair(s, y));
+                        modified.emplace(s, y);
                         affected[s] = true;
                         TRACE("Node ", y, ", Inserting node ", s, " with new priority ",
                               diameter + 1 - distances[s][y]);
                         TRACE("Node ", y, ", Inserting node ", s, " with old priority ",
                               diameter + 1 - distancesOld[s][y]);
-                        Qnew.push(std::make_pair(diameter + 1.0 - distances[s][y], s));
-                        Qold.push(std::make_pair(diameter + 1.0 - distancesOld[s][y], s));
+                        Qnew.emplace(diameter + 1.0 - distances[s][y], s);
+                        Qold.emplace(diameter + 1.0 - distancesOld[s][y], s);
                     } else if (distances[s][y] < distances[s][u] + weightuv + distances[v][y]) {
                         std::swap(source_nodes[c], source_nodes[n_sources[y] - 1]);
                         c--;
@@ -296,7 +297,7 @@ void DynBetweenness::update(GraphEvent event) {
                         }
                         stack.push(w);
                         enqueued[w] = true;
-                        modified.push(std::make_pair(u, w));
+                        modified.emplace(u, w);
                         Pred[w] = y;
                     }
                 });
@@ -323,7 +324,7 @@ void DynBetweenness::update(GraphEvent event) {
     }
 }
 
-void DynBetweenness::updateBatch(const std::vector<GraphEvent> &batch) {
+void DynBetweenness::updateBatch(std::span<const GraphEvent> batch) {
     for (auto e : batch) {
         update(e);
     }

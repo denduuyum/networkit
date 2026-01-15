@@ -1,5 +1,5 @@
-
 #include <algorithm>
+#include <span>
 
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/auxiliary/Random.hpp>
@@ -328,7 +328,7 @@ Graph toUnweighted(const Graph &G) {
         WARN("The graph is already unweighted");
     }
 
-    return Graph(G, false, G.isDirected());
+    return Graph(G, false, G.isDirected(), G.hasEdgeIds());
 }
 
 Graph toWeighted(const Graph &G) {
@@ -336,7 +336,7 @@ Graph toWeighted(const Graph &G) {
         WARN("The graph is already weighted");
     }
 
-    return Graph(G, true, G.isDirected());
+    return Graph(G, true, G.isDirected(), G.hasEdgeIds());
 }
 
 Graph transpose(const Graph &G) {
@@ -468,7 +468,7 @@ std::vector<node> invertContinuousNodeIds(const std::unordered_map<node, node> &
     return invertedIdMap;
 }
 
-Graph restoreGraph(const std::vector<node> &invertedIdMap, const Graph &G) {
+Graph restoreGraph(std::span<const node> invertedIdMap, const Graph &G) {
     // with the inverted id map and the compacted graph, generate the original graph again
     Graph Goriginal(invertedIdMap.back(), G.isWeighted(), G.isDirected());
     index current = 0;
@@ -518,6 +518,51 @@ std::vector<node> topologicalSort(const Graph &G) {
     topSort.run();
 
     return topSort.getResult();
+}
+
+std::vector<node> topologicalSort(const Graph &G,
+                                  const std::unordered_map<node, node> &nodeIdMapping,
+                                  bool checkMapping) {
+    TopologicalSort topSort(G, nodeIdMapping, checkMapping);
+    topSort.run();
+
+    return topSort.getResult();
+}
+
+bool isBipartite(const Graph &graph) {
+    if (graph.isDirected()) {
+        throw std::runtime_error("The graph is not an undirected graph!");
+    }
+    constexpr int8_t uncolored = -1;
+    constexpr int8_t black = 0;
+    constexpr int8_t red = 1;
+    std::vector<int8_t> colors(graph.upperNodeIdBound(), uncolored);
+    bool isBipartite = true;
+
+    auto bfs = [&](node u) {
+        if (colors[u] != uncolored)
+            return;
+        colors[u] = black;
+        std::queue<node> queue;
+        queue.push(u);
+        do {
+            const node currentNode = queue.front();
+            queue.pop();
+            for (const node neighbor : graph.neighborRange(currentNode)) {
+                if (colors[neighbor] == uncolored) {
+                    colors[neighbor] = red - colors[currentNode];
+                    queue.push(neighbor);
+                } else if (colors[neighbor] == colors[currentNode]) {
+                    isBipartite = false;
+                    return;
+                }
+            }
+        } while (!queue.empty());
+    };
+
+    graph.forNodesWhile([&]() { return isBipartite; }, bfs);
+
+    return isBipartite;
 }
 
 } // namespace GraphTools

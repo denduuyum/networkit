@@ -7,14 +7,15 @@
 
 #include <gtest/gtest.h>
 
+#include <stack>
+
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/distance/BFS.hpp>
 #include <networkit/distance/Dijkstra.hpp>
-#include <networkit/distance/DynBFS.hpp>
 #include <networkit/distance/DynDijkstra.hpp>
 #include <networkit/io/METISGraphReader.hpp>
 
-#include <stack>
+#include <tlx/unused.hpp>
 
 namespace NetworKit {
 
@@ -50,6 +51,28 @@ TEST_F(SSSPGTest, testDijkstra) {
         EXPECT_LE(sssp.distance(stack[i]), sssp.distance(stack[i + 1]));
 }
 
+TEST_F(SSSPGTest, testSSSPThrowsInvalidSource) {
+    Graph G(5, true);
+    BFS bfs(G, /*source*/ 1);
+    EXPECT_THROW(bfs.setSource(/*invalid_source*/ 6), std::runtime_error);
+}
+
+TEST_F(SSSPGTest, testSSSPThrowsInvalidTarget) {
+    Graph G(5, true);
+    BFS bfs(G, /*source*/ 1);
+    EXPECT_THROW(bfs.setTarget(/*invalid_target*/ 6), std::runtime_error);
+}
+
+TEST_F(SSSPGTest, testSSSPThrowsStorepathNotTrueCallPredecessor) {
+    Graph G(3, true);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    BFS bfs(G, /*source*/ 0, /*storePaths*/ false);
+    bfs.setTarget(/*target*/ 2);
+    bfs.run();
+    EXPECT_THROW(bfs.getPredecessors(/*node*/ 1), std::runtime_error);
+}
+
 TEST_F(SSSPGTest, testShortestPaths) {
     METISGraphReader reader;
     Graph G = reader.read("input/PGPgiantcompo.graph");
@@ -58,7 +81,7 @@ TEST_F(SSSPGTest, testShortestPaths) {
     BFS bfs(G, source);
     bfs.run();
     bigfloat max = 0;
-    node x;
+    node x = 0;
     G.forNodes([&](node n) {
         if (bfs.numberOfPaths(n) > max) {
             max = bfs.numberOfPaths(n);
@@ -68,9 +91,11 @@ TEST_F(SSSPGTest, testShortestPaths) {
     count dist = bfs.distance(x);
     std::set<std::vector<node>> paths = bfs.getPaths(x, true);
     count i = 0;
-    for (auto path : paths) {
+    tlx::unused(i);
+    for (const auto &path : paths) {
         DEBUG("Path number ", i);
-        i++;
+        ++i;
+        tlx::unused(i);
         DEBUG(path);
         EXPECT_EQ(path[0], source);
         EXPECT_EQ(path[dist], x);

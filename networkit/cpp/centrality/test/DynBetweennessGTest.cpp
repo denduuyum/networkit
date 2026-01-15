@@ -14,7 +14,7 @@
 #include <networkit/centrality/Betweenness.hpp>
 #include <networkit/centrality/DynApproxBetweenness.hpp>
 #include <networkit/centrality/DynBetweenness.hpp>
-#include <networkit/generators/DorogovtsevMendesGenerator.hpp>
+#include <networkit/centrality/DynBetweennessOneNode.hpp>
 #include <networkit/generators/ErdosRenyiGenerator.hpp>
 #include <networkit/graph/GraphTools.hpp>
 #include <networkit/io/METISGraphReader.hpp>
@@ -26,12 +26,6 @@ protected:
     bool isDirected() const noexcept { return GetParam().first; };
     bool isWeighted() const noexcept { return GetParam().second; };
     Graph generateSmallGraph() const;
-
-    void generateRandomWeights(Graph &G) const {
-        if (!G.isWeighted())
-            G = GraphTools::toWeighted(G);
-        G.forEdges([&](node u, node v) { G.setWeight(u, v, Aux::Random::probability()); });
-    }
 
     static constexpr double epsilon = 0.1, delta = 0.1;
 
@@ -81,13 +75,14 @@ Graph DynBetweennessGTest::generateSmallGraph() const {
         G.addEdge(5, 2);
     }
 
-    if (isWeighted())
-        generateRandomWeights(G);
+    if (isWeighted()) {
+        Aux::Random::setSeed(42, false);
+        GraphTools::randomizeWeights(G);
+    }
     return G;
 }
 
 TEST_P(DynBetweennessGTest, runDynApproxBetweennessSmallGraph) {
-    Aux::Random::setSeed(42, false);
     Graph G = generateSmallGraph();
     DynApproxBetweenness dynbc(G, epsilon, delta);
     Betweenness bc(G);
@@ -103,7 +98,6 @@ TEST_P(DynBetweennessGTest, runDynApproxBetweennessSmallGraph) {
 }
 
 TEST_P(DynBetweennessGTest, runDynApproxBetweennessSmallGraphEdgeDeletion) {
-    Aux::Random::setSeed(42, false);
     Graph G = generateSmallGraph();
     DynApproxBetweenness dynbc(G, epsilon, delta);
     Betweenness bc(G);
@@ -122,8 +116,9 @@ TEST_P(DynBetweennessGTest, testDynApproxBetweenessGeneratedGraph) {
     Aux::Random::setSeed(42, false);
     ErdosRenyiGenerator generator(100, 0.25, isDirected());
     Graph G = generator.generate();
-    if (isWeighted())
-        generateRandomWeights(G);
+    if (isWeighted()) {
+        GraphTools::randomizeWeights(G);
+    }
 
     DynApproxBetweenness dynbc(G, epsilon, delta);
     Betweenness bc(G);
@@ -143,6 +138,10 @@ TEST_P(DynBetweennessGTest, runDynApproxBetweenessGeneratedGraphEdgeDeletion) {
     Aux::Random::setSeed(42, false);
     ErdosRenyiGenerator generator(100, 0.25, isDirected());
     Graph G = generator.generate();
+    if (isWeighted()) {
+        Aux::Random::setSeed(42, false);
+        GraphTools::randomizeWeights(G);
+    }
 
     DynApproxBetweenness dynbc(G, epsilon, delta);
     Betweenness bc(G);
@@ -246,6 +245,36 @@ TEST_F(DynBetweennessGTest, runDynVsStaticCaseInsertUndirected) {
             brandes.run();
             g.forNodes([&](node w) { EXPECT_NEAR(brandes.score(w), ibet.score(w), 1e-8); });
         }
+}
+
+TEST_P(DynBetweennessGTest, testDynamicBetweennessOneNode) {
+    // for each of the 8 focus nodes in the small graph
+    for (node x = 0; x < 8; ++x) {
+        Graph G = generateSmallGraph();
+
+        DynBetweennessOneNode dynb(G, x);
+        dynb.run();
+
+        Betweenness b(G);
+        b.run();
+
+        EXPECT_NEAR(dynb.getbcx(), b.score(x), 0.01);
+
+        for (count i = 0; i < 10; ++i) {
+            auto e = getNonAdjacentNodes(G);
+            edgeweight ew = 1.0;
+            if (G.isWeighted()) {
+                ew = Aux::Random::real(1);
+            }
+            G.addEdge(e.first, e.second, ew);
+            dynb.update(GraphEvent(GraphEvent::EDGE_ADDITION, e.first, e.second, ew));
+        }
+
+        Betweenness b_updated(G);
+        b_updated.run();
+
+        EXPECT_NEAR(dynb.getbcx(), b_updated.score(x), 0.01);
+    }
 }
 
 } /* namespace NetworKit */

@@ -13,7 +13,9 @@
 
 #include <networkit/generators/BarabasiAlbertGenerator.hpp>
 #include <networkit/generators/ChungLuGenerator.hpp>
+#include <networkit/generators/ChungLuGeneratorAlamEtAl.hpp>
 #include <networkit/generators/ClusteredRandomGraphGenerator.hpp>
+#include <networkit/generators/ConfigurationModel.hpp>
 #include <networkit/generators/DorogovtsevMendesGenerator.hpp>
 #include <networkit/generators/DynamicBarabasiAlbertGenerator.hpp>
 #include <networkit/generators/DynamicDorogovtsevMendesGenerator.hpp>
@@ -29,6 +31,7 @@
 #include <networkit/generators/LFRGenerator.hpp>
 #include <networkit/generators/MocnikGenerator.hpp>
 #include <networkit/generators/MocnikGeneratorBasic.hpp>
+#include <networkit/generators/PowerlawDegreeSequence.hpp>
 #include <networkit/generators/PubWebGenerator.hpp>
 #include <networkit/generators/RegularRingLatticeGenerator.hpp>
 #include <networkit/generators/RmatGenerator.hpp>
@@ -56,8 +59,8 @@ class GeneratorsGTest : public testing::Test {
 
 protected:
     template <class Type>
-    std::vector<Type> readVector(const std::string &path) const {
-        std::ifstream inputFile(path);
+    std::vector<Type> readVector(std::string_view path) const {
+        std::ifstream inputFile(path.data());
         Type cur;
         std::vector<Type> data;
 
@@ -223,6 +226,62 @@ TEST_F(GeneratorsGTest, testClusteredRandomGraphGeneratorSparseCommunities) {
                 });
                 EXPECT_EQ(leftToVisit, 0);
             }
+        }
+    }
+}
+
+TEST_F(GeneratorsGTest, testConfigurationModelGeneratorWithEdgeSwitchingOnRealSequence) {
+    METISGraphReader reader;
+    auto graphs = {"input/jazz.graph", "input/lesmis.graph"};
+
+    for (auto path : graphs) {
+        Graph G = reader.read(path);
+        count n = G.upperNodeIdBound();
+        std::vector<count> sequence(n);
+        G.forNodes([&](node u) { sequence[u] = G.degree(u); });
+
+        bool skipTest = false;
+        EdgeSwitchingMarkovChainGenerator gen(sequence, skipTest);
+        Graph G2 = gen.generate();
+
+        count volume = std::accumulate(sequence.begin(), sequence.end(), 0);
+        EXPECT_EQ(volume, 2 * G2.numberOfEdges());
+
+        std::vector<count> testSequence(n);
+        G2.forNodes([&](node u) { testSequence[u] = G2.degree(u); });
+        Aux::Parallel::sort(testSequence.begin(), testSequence.end(), std::greater<count>());
+        Aux::Parallel::sort(sequence.begin(), sequence.end(), std::greater<count>());
+
+        for (index i = 0; i < n; ++i) {
+            EXPECT_EQ(sequence[i], testSequence[i]);
+        }
+    }
+}
+
+TEST_F(GeneratorsGTest, testConfigurationModelGeneratorWithRejectionSamplingOnRealSequence) {
+    METISGraphReader reader;
+    Aux::Random::setSeed(42, false);
+    auto graphs = {"input/jazz.graph", "input/lesmis.graph"};
+
+    for (auto path : graphs) {
+        Graph G = reader.read(path);
+        count n = G.numberOfNodes();
+        std::vector<count> sequence(n);
+        G.forNodes([&](node u) { sequence[u] = G.degree(u); });
+
+        ConfigurationModel gen(sequence);
+        Graph G2 = gen.generate();
+
+        count volume = std::accumulate(sequence.begin(), sequence.end(), 0);
+        EXPECT_EQ(volume, 2 * G2.numberOfEdges());
+
+        std::vector<count> testSequence(n);
+        G2.forNodes([&](node u) { testSequence[u] = G2.degree(u); });
+        Aux::Parallel::sort(testSequence.begin(), testSequence.end(), std::greater<count>());
+        Aux::Parallel::sort(sequence.begin(), sequence.end(), std::greater<count>());
+
+        for (index i = 0; i < n; ++i) {
+            EXPECT_EQ(sequence[i], testSequence[i]);
         }
     }
 }
@@ -540,6 +599,30 @@ TEST_F(GeneratorsGTest, generatetBarabasiAlbertGeneratorGraph) {
     io.writeAdjacencyList(G, "output/BarabasiGraph.txt");
 }
 
+TEST_F(GeneratorsGTest, testParallelBarabasiAlbertGeneratorDistribution) {
+    count k = 3;
+    count nMax = 1000;
+    count n0 = 3;
+
+    BarabasiAlbertGenerator BarabasiAlbert(k, nMax, n0, false);
+
+    Graph G = BarabasiAlbert.generate();
+    G.forNodes([&G, k, n0](node u) {
+        if (u < n0)
+            return;
+        int totalEdges = 0;
+        G.forEdgesOf(u, [&totalEdges, u](node v) {
+            if (v < u)
+                totalEdges++;
+        });
+        EXPECT_EQ(totalEdges, k);
+    });
+    PowerlawDegreeSequence sequence(G);
+    auto gamma = sequence.getGamma();
+    EXPECT_LT(gamma, -2);
+    EXPECT_GT(gamma, -3);
+}
+
 TEST_F(GeneratorsGTest, testDynamicPathGenerator) {
     count nSteps = 42;
     DynamicPathGenerator gen;
@@ -612,6 +695,70 @@ TEST_F(GeneratorsGTest, testRmatGenerator) {
     EXPECT_TRUE(G.checkConsistency());
 }
 
+TEST_F(GeneratorsGTest, testRmatGeneratorDistribution) {
+    constexpr count scale = 2;
+    constexpr count n = (1 << scale);
+    count edgeFactor = 1;
+    double a = 0.51;
+    double b = 0.12;
+    double c = 0.12;
+    double d = 0.25;
+    double edgeExpectedProbability[n][n] = {
+        {0.0e+00, 0.0e+00, 0.0e+00, 0.0e+00},
+        {2.242834007823646e-01, 0.0e+00, 0.0e+00, 0.0e+00},
+        {2.242834007823646e-01, 1.0219127659785153e-01, 0.0e+00, 0.0e+00},
+        {1.0219127659785153e-01, 1.7352532261978387e-01, 1.7352532261978387e-01, 0.0e+00},
+    };
+
+    RmatGenerator rmat(scale, edgeFactor, a, b, c, d, false, 0, true);
+    count edgeCount[n][n]{{0}};
+    count totalEdges = 0;
+    // Now we generate a bunch of graphs and count the edges.
+    for (index k = 0; k < 1000; k++) {
+        Graph G = rmat.generate();
+        G.forEdges([&edgeCount, &totalEdges](node u, node v) {
+            edgeCount[u][v] += 1;
+            totalEdges += 1;
+        });
+    }
+    for (index i = 0; i < n; ++i) {
+        for (index j = 0; j < n; ++j) {
+            EXPECT_NEAR((static_cast<double>(edgeCount[i][j]) / static_cast<double>(totalEdges)),
+                        edgeExpectedProbability[i][j], 0.01);
+        }
+    }
+}
+
+TEST_F(GeneratorsGTest, testRmatGeneratorReduceNodes) {
+    count scale = 9;
+    count n = (1 << scale);
+    count edgeFactor = 12;
+    double a = 0.51;
+    double b = 0.12;
+    double c = 0.12;
+    double d = 0.25;
+    int reducedNodes = 4;
+
+    RmatGenerator rmat(scale, edgeFactor, a, b, c, d, false, reducedNodes);
+    Graph G = rmat.generate();
+
+    EXPECT_EQ(G.numberOfNodes(), n - reducedNodes);
+    EXPECT_LE(G.numberOfEdges(), n * edgeFactor);
+
+    ClusteringCoefficient cc;
+    double ccex = cc.exactGlobal(G);
+    EXPECT_LE(ccex, 0.4);
+
+    PLM clusterer(G, true);
+    clusterer.run();
+    Partition zeta = clusterer.getPartition();
+    Modularity mod;
+    double modVal = mod.getQuality(zeta, G);
+    INFO("Modularity of R-MAT graph clustering: ", modVal);
+    EXPECT_GE(modVal, 0.0);
+    EXPECT_TRUE(G.checkConsistency());
+}
+
 TEST_F(GeneratorsGTest, testChungLuGenerator) {
     count n = 400;
     count maxDegree = n / 8;
@@ -667,6 +814,67 @@ TEST_F(GeneratorsGTest, testChungLuGeneratorVolumeConsistency) {
         expectedVolume += grad;
     }
     ChungLuGenerator generator(vec);
+    Graph G = generator.generate();
+    /* Check if volume is more than 10% off from the expected volume. */
+    // TODO Is a 20% offset here sufficient? */
+    EXPECT_NEAR(G.numberOfEdges() * 2, expectedVolume, 0.2 * expectedVolume);
+}
+
+TEST_F(GeneratorsGTest, testChungLuGeneratorAlamEtAl) {
+    count n = 400;
+    count maxDegree = n / 8;
+    std::vector<count> sequence(n);
+    count expVolume = 0;
+    count actualVolume = 0;
+
+    // fill sequence with random values (this is not power-law, of course!)
+    for (index i = 0; i < n; ++i) {
+        sequence[i] = rand() % maxDegree;
+        expVolume += sequence[i];
+    }
+
+    ChungLuGeneratorAlamEtAl gen(sequence);
+    Graph G = gen.generate();
+    EXPECT_TRUE(G.checkConsistency());
+
+    EXPECT_EQ(n, G.numberOfNodes());
+    G.forNodes([&](node v) { actualVolume += G.degree(v); });
+
+    INFO("expected volume: ", expVolume, ", actual volume: ", actualVolume);
+}
+
+TEST_F(GeneratorsGTest, testChungLuGeneratorAlamEtAlDegreeConsistency) {
+    count n = 1000;
+    std::vector<count> vec;
+    count maxDegree = n / 8;
+    /* Creates a random sequence of weights */
+    for (index i = 0; i < n; i++) {
+        int grad = Aux::Random::integer(1, maxDegree);
+        vec.push_back(grad);
+    }
+    ChungLuGeneratorAlamEtAl generator(vec);
+    Graph G = generator.generate();
+    /* We check to see if the actual degrees of our nodes vary too much from the expected ones.
+     * However, we need to sort the expected degrees first, since the algorithm does this as well
+     * and the nodes with the highest degrees are added first. */
+    Aux::Parallel::sort(vec.begin(), vec.end(), [](count a, count b) { return a < b; });
+    /* Check if node degree is more than 50% off from the expected degree of that node. */
+    // TODO Should we be looking for something better than a 50% range here?
+    G.parallelForNodes([&](node v) { EXPECT_NEAR(G.degree(v), vec[v], (0.5 * maxDegree)); });
+}
+
+TEST_F(GeneratorsGTest, testChungLuGeneratorAlamEtAlVolumeConsistency) {
+    count n = 1000;
+    std::vector<count> vec;
+    count maxDegree = n / 8;
+    count expectedVolume = 0;
+    /* Creates a random sequence of weights */
+    for (index i = 0; i < n; i++) {
+        int grad = Aux::Random::integer(1, maxDegree);
+        vec.push_back(grad);
+        expectedVolume += grad;
+    }
+    ChungLuGeneratorAlamEtAl generator(vec);
     Graph G = generator.generate();
     /* Check if volume is more than 10% off from the expected volume. */
     // TODO Is a 20% offset here sufficient? */
@@ -1113,6 +1321,22 @@ TEST_F(GeneratorsGTest, testLFRGeneratorWithRealData) {
     EXPECT_EQ(C.numberOfSubsets(), gen.getPartition().numberOfSubsets());
 }
 
+TEST_F(GeneratorsGTest, testLFRGeneratorWithBinomialDistribution) {
+    Aux::Random::setSeed(42, false);
+    count n = 500;
+    LFRGenerator gen(n);
+    gen.generatePowerlawDegreeSequence(20, 50, -2);
+    gen.generatePowerlawCommunitySizeSequence(10, 50, -1);
+    gen.setMuWithBinomialDistribution(0.5);
+    gen.run();
+    Graph G1 = gen.getMoveGraph();
+    gen.run(); // should rewire the edges but nothing else
+    Graph G2 = gen.getMoveGraph();
+    EXPECT_EQ(n, G1.numberOfNodes());
+    EXPECT_EQ(n, G2.numberOfNodes());
+    EXPECT_EQ(G1.numberOfEdges(), G2.numberOfEdges());
+}
+
 TEST_F(GeneratorsGTest, testMocnikGenerator) {
     count dim = 3;
     count n = 10000;
@@ -1139,6 +1363,34 @@ TEST_F(GeneratorsGTest, testMocnikGeneratorBasic) {
     EXPECT_FALSE(G.isEmpty());
     EXPECT_EQ(G.numberOfNodes(), n);
     EXPECT_NEAR(G.numberOfEdges() * 1. / G.numberOfNodes(), std::pow(k, dim), 10000);
+}
+
+TEST_F(GeneratorsGTest, testPowerLawDegreeSequenceFromDegreeSequence) {
+    std::vector<double> inputVector = {2, 4, 3, 2, 1, 6};
+    double sum = 0.0;
+    for (auto it = inputVector.begin(); it != inputVector.end(); ++it) {
+        sum += *it;
+    }
+    auto avg = sum / inputVector.size();
+
+    PowerlawDegreeSequence PLDS(inputVector);
+    PLDS.setGammaFromAverageDegree(avg);
+    PLDS.run();
+    EXPECT_NEAR(PLDS.getExpectedAverageDegree(), avg, 1.0);
+    EXPECT_EQ(PLDS.getMinimumDegree(), 1);
+    EXPECT_EQ(PLDS.getMaximumDegree(), 6);
+}
+
+TEST_F(GeneratorsGTest, testPowerLawDegreeSequenceFromGraph) {
+    METISGraphReader reader;
+    auto graphpath = "input/jazz.graph";
+    Graph G = reader.read(graphpath);
+
+    PowerlawDegreeSequence PLDS(G);
+    PLDS.run();
+    EXPECT_NEAR(PLDS.getExpectedAverageDegree(), 19, 1);
+    EXPECT_EQ(PLDS.getMinimumDegree(), 1);
+    EXPECT_EQ(PLDS.getMaximumDegree(), 100);
 }
 
 } /* namespace NetworKit */

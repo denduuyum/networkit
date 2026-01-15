@@ -7,6 +7,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <random>
 
 #include <gtest/gtest.h>
 
@@ -19,6 +20,7 @@
 #include <networkit/centrality/ApproxSpanningEdge.hpp>
 #include <networkit/centrality/Betweenness.hpp>
 #include <networkit/centrality/Closeness.hpp>
+#include <networkit/centrality/ComplexPaths.hpp>
 #include <networkit/centrality/CoreDecomposition.hpp>
 #include <networkit/centrality/DegreeCentrality.hpp>
 #include <networkit/centrality/DynApproxBetweenness.hpp>
@@ -40,10 +42,13 @@
 #include <networkit/centrality/KatzCentrality.hpp>
 #include <networkit/centrality/LaplacianCentrality.hpp>
 #include <networkit/centrality/LocalClusteringCoefficient.hpp>
+#include <networkit/centrality/LocalPartitionCoverage.hpp>
 #include <networkit/centrality/LocalSquareClusteringCoefficient.hpp>
 #include <networkit/centrality/PageRank.hpp>
 #include <networkit/centrality/PermanenceCentrality.hpp>
+#include <networkit/centrality/Sfigality.hpp>
 #include <networkit/centrality/SpanningEdgeCentrality.hpp>
+#include <networkit/community/ClusteringGenerator.hpp>
 #include <networkit/components/ConnectedComponents.hpp>
 #include <networkit/distance/Dijkstra.hpp>
 #include <networkit/generators/DorogovtsevMendesGenerator.hpp>
@@ -223,17 +228,15 @@ TEST_F(CentralityGTest, testBetweennessCentralityWeighted) {
 
 // TODO: replace by smaller graph
 TEST_F(CentralityGTest, testKatzCentralityDirected) {
+    Aux::Log::setLogLevel("QUIET");
     const auto G = SNAPGraphReader{}.read("input/wiki-Vote.txt");
     KatzCentrality kc(G, 5e-4);
-
-    DEBUG("start kc run");
     kc.run();
-    DEBUG("finish kc");
-
     EXPECT_EQ(kc.ranking().front().first, 699);
 }
 
 TEST_F(CentralityGTest, testKatzTopk) {
+    Aux::Log::setLogLevel("QUIET");
     const auto G = METISGraphReader{}.read("input/caidaRouterLevel.graph");
 
     KatzCentrality exactAlgo(G, 0, 1.0);
@@ -773,6 +776,139 @@ TEST_F(CentralityGTest, testApproxClosenessCentralityOnToyGraph) {
     EXPECT_NEAR(0.2, maximum2, tol);
 }
 
+TEST_F(CentralityGTest, testApproxClosenessCentralityOnDirectedToyGraph) {
+    /* Graph:
+     0 -> 3
+     ^   /
+      \ /
+       2    5
+      /  \ /
+     1    4
+    */
+    Graph G(6, false, true);
+
+    G.addEdge(0, 3);
+    G.addEdge(2, 0);
+    G.addEdge(1, 2);
+    G.addEdge(2, 1);
+    G.addEdge(3, 2);
+    G.addEdge(2, 3);
+    G.addEdge(4, 2);
+    G.addEdge(2, 4);
+    G.addEdge(4, 5);
+    G.addEdge(5, 4);
+
+    ApproxCloseness acc(G, 6, 0.1, true);
+    acc.run();
+    std::vector<double> cc = acc.scores();
+    double tol = 0.01;
+
+    EXPECT_NEAR(acc.maximum(), 0.2, tol);
+    EXPECT_NEAR(cc[0], 0.38, tol);
+    EXPECT_NEAR(cc[1], 0.50, tol);
+    EXPECT_NEAR(cc[2], 0.83, tol);
+    EXPECT_NEAR(cc[3], 0.50, tol);
+    EXPECT_NEAR(cc[4], 0.62, tol);
+    EXPECT_NEAR(cc[5], 0.41, tol);
+}
+
+TEST_F(CentralityGTest, testBetweennessMaximum) {
+    /* Graph:
+     0    3
+      \  / \
+       2    5
+      /  \ /
+     1    4
+    */
+    Graph G(6);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+    G.indexEdges();
+
+    Betweenness bet(G, false, false);
+    bet.run();
+    EXPECT_EQ(bet.maximum(), 10);
+    EXPECT_NEAR(bet.centralization(), 1.79, 0.01);
+}
+
+TEST_F(CentralityGTest, testBetweennessMaximumNormalized) {
+    /* Graph:
+     0    3
+      \  / \
+       2    5
+      /  \ /
+     1    4
+    */
+    Graph G(6);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+    G.indexEdges();
+
+    Betweenness betNormalized(G, true, true);
+    betNormalized.run();
+    EXPECT_EQ(betNormalized.maximum(), 1);
+    EXPECT_NEAR(betNormalized.centralization(), 0.69, 0.01);
+}
+
+TEST_F(CentralityGTest, testLocalPartitionCoverage) {
+    /* Graph:
+     0    3
+      \  / \
+       2    5
+      /  \ /
+     1    4
+    */
+    Graph G(6);
+
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+
+    ClusteringGenerator clustGen;
+    Partition P = clustGen.makeContinuousBalancedClustering(G, 3);
+
+    LocalPartitionCoverage LPC(G, P);
+    LPC.run();
+    EXPECT_EQ(LPC.maximum(), 1);
+    EXPECT_NEAR(LPC.centralization(), 0.29, 0.01);
+}
+
+TEST_F(CentralityGTest, testSfigality) {
+    /* Graph:
+     0    3
+      \  / \
+       2    5
+      /  \ /
+     1    4
+    */
+    Graph G(6);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+
+    Sfigality sf(G);
+    sf.run();
+    auto res = sf.scores();
+    vector<double> expectedRes = {1, 1, 0, 0.5, 0.5, 0};
+    for (index i = 0; i < res.size(); ++i)
+        EXPECT_EQ(res[i], expectedRes[i]);
+    EXPECT_EQ(sf.maximum(), 1);
+}
+
 TEST_F(CentralityGTest, testEdgeBetweennessCentrality) {
     /* Graph:
      0    3
@@ -841,7 +977,7 @@ TEST_P(CentralityGTest, testClosenessCentrality) {
 
     if (isWeighted()) {
         Aux::Random::setSeed(42, false);
-        G.forEdges([&](node u, node v) { G.setWeight(u, v, Aux::Random::probability()); });
+        GraphTools::randomizeWeights(G);
     }
 
     auto computeCloseness = [&](node u, ClosenessVariant variant, bool normalized) {
@@ -1807,11 +1943,12 @@ TEST_F(CentralityGTest, testApproxElectricalCloseness) {
         Aux::Random::setSeed(seed, true);
         auto G = HyperbolicGenerator(n, 10, 3).generate();
         G = ConnectedComponents::extractLargestConnectedComponent(G, true);
+        auto new_n = G.numberOfNodes();
 
         // Create a biconnected component with size 2.
         G.addNodes(2);
-        G.addEdge(n - 1, n);
-        G.addEdge(n, n + 1);
+        G.addEdge(new_n - 1, new_n);
+        G.addEdge(new_n, new_n + 1);
 
         ApproxElectricalCloseness apx(G);
         apx.run();
@@ -1822,29 +1959,29 @@ TEST_F(CentralityGTest, testApproxElectricalCloseness) {
     }
 }
 
+TEST_F(CentralityGTest, testGroupClosenessDirected) {
+    // directed graphs are not supported
+    Graph G(10, false, true);
+    std::array<node, 1> group = {{0}};
+    EXPECT_THROW(GroupClosenessGrowShrink(G, group.begin(), group.end()), std::runtime_error);
+}
+
+TEST_F(CentralityGTest, testGroupClosenessEmptyGroups) {
+    // Empty input groups are not supported
+    Graph G(10);
+    std::vector<node> emptyGroup;
+    EXPECT_THROW(GroupClosenessGrowShrink(G, emptyGroup.begin(), emptyGroup.end()),
+                 std::runtime_error);
+}
+
 TEST_P(CentralityGTest, testGroupClosenessGrowShrink) {
-    if (isDirected()) { // directed graphs are not supported
-        Graph G(10, isWeighted(), true);
-        std::array<node, 1> group;
-        EXPECT_THROW(GroupClosenessGrowShrink(G, group.begin(), group.end()), std::runtime_error);
-        return;
-    }
-
-    { // Empty input groups are not supported
-        Graph G(10, isWeighted(), false);
-        std::vector<node> emptyGroup;
-        EXPECT_THROW(GroupClosenessGrowShrink(G, emptyGroup.begin(), emptyGroup.end()),
-                     std::runtime_error);
-    }
-
     const count k = 5;
     auto G = EdgeListReader{'\t', 0, "#", false, false}.read("input/MIT8.edgelist");
     G = ConnectedComponents::extractLargestConnectedComponent(G);
 
     if (isWeighted()) {
-        G = GraphTools::toWeighted(G);
-        G.forEdges(
-            [&G](const node u, const node v) { G.setWeight(u, v, Aux::Random::probability()); });
+        Aux::Random::setSeed(42, false);
+        GraphTools::randomizeWeights(G);
     }
 
     auto farnessOfGroup = [&](const Graph &G, const std::unordered_set<node> &group) -> edgeweight {
@@ -1909,6 +2046,7 @@ TEST_P(CentralityGTest, testDegreeCentrality) {
 
     DegreeCentrality dc(g, false, true, false);
     dc.run();
+    EXPECT_EQ(dc.maximum(), 8);
 
     if (isDirected()) {
         std::array<int, 8> expectedResults{{2, 1, 3, 1, 1, 3, 0, 1}};
@@ -1984,7 +2122,7 @@ TEST_P(CentralityGTest, testDegreeCentralityIgnoreSelfLoops) {
 TEST_P(CentralityGTest, testGroupClosenessLocalSwaps) {
     if (isDirected()) { // directed graphs are not supported
         Graph G(10, isWeighted(), true);
-        std::array<node, 1> group;
+        std::array<node, 1> group = {{0}};
         EXPECT_THROW(GroupClosenessLocalSwaps(G, group.begin(), group.end()), std::runtime_error);
         return;
     }
@@ -2001,9 +2139,7 @@ TEST_P(CentralityGTest, testGroupClosenessLocalSwaps) {
     G = ConnectedComponents::extractLargestConnectedComponent(G);
 
     if (isWeighted()) {
-        G = GraphTools::toWeighted(G);
-        G.forEdges(
-            [&G](const node u, const node v) { G.setWeight(u, v, Aux::Random::probability()); });
+        GraphTools::randomizeWeights(G);
     }
 
     auto farnessOfGroup = [&](const Graph &G, const std::unordered_set<node> &group) -> count {
@@ -2129,8 +2265,7 @@ TEST_P(CentralityGTest, testGroupClosenessLocalSearch) {
     Aux::Random::setSeed(1, true);
     auto G = ErdosRenyiGenerator(100, 0.1, isDirected()).generate();
     if (isWeighted()) {
-        G = GraphTools::toWeighted(G);
-        G.forEdges([&](node u, node v) { G.setWeight(u, v, Aux::Random::real(10)); });
+        GraphTools::randomizeWeights(G, std::uniform_real_distribution<edgeweight>{0, 10});
     }
 
     std::unordered_set<node> initGroup;
@@ -2188,6 +2323,74 @@ TEST_F(CentralityGTest, testForestCentrality) {
     G.forNodes([&](node u) { EXPECT_NEAR(apxDiag[u], diag[u], eps); });
 
     EXPECT_EQ(fc.scores().size(), G.upperNodeIdBound());
+}
+
+TEST_F(CentralityGTest, testComplexPathsSingleNode) {
+    /* Graph:
+     0    3
+      \  / \
+       2   5 - 6
+      / \ /     \
+     1   4 - - - 7 */
+    Graph G(8);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+    G.addEdge(4, 7);
+    G.addEdge(5, 6);
+    G.addEdge(6, 7);
+    Aux::Random::setSeed(42, false);
+
+    count threshold = 2;
+    ComplexPathAlgorithm CP(G, threshold, NetworKit::ComplexPathAlgorithm::singleNode, 0);
+    CP.run();
+
+    auto adopters = CP.getAdopters();
+    // only the neighbour(2) of startnode(0) will adopt
+    for (auto adoptee : adopters)
+        EXPECT_TRUE(adoptee == 0 || adoptee == 2);
+
+    auto resG = CP.getComplexGraph();
+    EXPECT_EQ(resG.numberOfNodes(), G.numberOfNodes());
+    EXPECT_EQ(resG.numberOfEdges(), 4);
+
+    // the remaining subgraph only contains the edges that are connected to node 2, because the
+    // adoption does not spread further
+    resG.forEdges([&](node u, node v) { EXPECT_TRUE(u == 2 || v == 2); });
+}
+
+TEST_F(CentralityGTest, testComplexPathsAllNodes) {
+    /* Graph:
+     0    3
+      \  / \
+       2   5 - 6
+      / \ /     \
+     1   4 - - - 7 */
+    Graph G(8);
+    G.addEdge(0, 2);
+    G.addEdge(1, 2);
+    G.addEdge(2, 3);
+    G.addEdge(2, 4);
+    G.addEdge(3, 5);
+    G.addEdge(4, 5);
+    G.addEdge(4, 7);
+    G.addEdge(5, 6);
+    G.addEdge(6, 7);
+    Aux::Random::setSeed(42, false);
+
+    count numberOfPaths = 2;
+    ComplexPathAlgorithm CP(G, numberOfPaths, NetworKit::ComplexPathAlgorithm::allNodes);
+    CP.run();
+
+    auto normalizedProbability = CP.getPLci();
+    // cannot ensure same values, therefore, checking size and type of result
+    EXPECT_EQ(normalizedProbability.size(), G.numberOfNodes());
+    for (index i = 0; i < normalizedProbability.size(); ++i) {
+        EXPECT_EQ(typeid(normalizedProbability[i]), typeid(double));
+    }
 }
 
 } /* namespace NetworKit */

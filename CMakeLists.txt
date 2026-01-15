@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.14)
 project(networkit CXX)
 
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
@@ -19,13 +19,14 @@ option(NETWORKIT_FLATINSTALL "Install into a flat directory structure (useful wh
 option(NETWORKIT_COVERAGE "Build with support for coverage" OFF)
 option(NETWORKIT_SANITY_CHECKS "Algorithms will perform further (expensive) checks" OFF)
 set(NETWORKIT_PYTHON "" CACHE STRING "Directory containing Python.h. Implies MONOLITH=TRUE")
+set(NETWORKIT_NUMPY "" CACHE STRING "Directory containing Numpy.h.")
 set(NETWORKIT_PYTHON_SOABI "" CACHE STRING "Platform specific file extension. Implies MONOLITH=TRUE")
 set(NETWORKIT_WITH_SANITIZERS "" CACHE STRING "Uses sanitizers during the compilation")
 set(NETWORKIT_RELEASE_LOGGING "AUTO" CACHE STRING "Do not compile log messages at levels TRACE or DEBUG (AUTO|ON|OFF)")
 set(NETWORKIT_PYTHON_RPATH "" CACHE STRING "Build specific rpath references.")
 set(NETWORKIT_EXT_TLX "" CACHE STRING "Absolute path for external tlx-library. If not set, extlibs/tlx is used")
 
-set (NETWORKIT_CXX_STANDARD "17" CACHE STRING "CXX Version to compile with. Currently fixed to 17")
+set (NETWORKIT_CXX_STANDARD "20" CACHE STRING "CXX Version to compile with. Currently fixed to 20")
 
 # Allow user to set installation paths relative to CMAKE_INSTALL_PREFIX
 
@@ -89,7 +90,7 @@ if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR
 	endif()
 
 elseif (MSVC)
-	set(NETWORKIT_CXX_FLAGS "${NETWORKIT_CXX_FLAGS} /DNETWORKIT_OMP2 /MP /DNETWORKIT_WINDOWS")
+	set(NETWORKIT_CXX_FLAGS "${NETWORKIT_CXX_FLAGS} /DNETWORKIT_OMP2 /MP /DNETWORKIT_WINDOWS /permissive-")
 
 	# TTMath requires running an ASM for MSVC which we disable here at the cost of worse performance
 	set(NETWORKIT_CXX_FLAGS "${NETWORKIT_CXX_FLAGS} /DTTMATH_NOASM=1")
@@ -150,18 +151,17 @@ if(NOT OpenMP_FOUND)
 			set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_INCLUDE}" CACHE STRING "Manually set" FORCE)
 		endif()
 	elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-		if(DEFINED ENV{CONDA_PREFIX})
+		find_library(LIBOMP_PATH NAMES omp PATHS "/usr/lib" "/usr/lib64" "/opt/local/lib/libomp" "/opt/homebrew/opt/libomp/lib")
+		find_path(LIBOMP_INCLUDE NAMES omp.h PATHS "/usr/include" "/usr/local/opt/libomp/include" "/opt/local/include/libomp" "/opt/homebrew/opt/libomp/include")
+		set(OpenMP_CXX_FLAGS "-fopenmp -I${LIBOMP_INCLUDE}" CACHE STRING "Manually set" FORCE)
+	endif()
+
+	# If libomp was not found yet, try to find it in conda environment
+	if(NOT LIBOMP_PATH OR NOT LIBOMP_INCLUDE)
 			find_library(LIBOMP_PATH NAMES omp HINTS "$ENV{CONDA_PREFIX}/lib"
 				PATHS "/usr/lib" "/usr/lib64")
 			find_path(LIBOMP_INCLUDE NAMES omp.h HINTS "$ENV{CONDA_PREFIX}/include"
 				PATHS "/usr/include")
-		else()
-			find_library(LIBOMP_PATH NAMES omp PATHS "/usr/lib" "/usr/lib64")
-			find_path(LIBOMP_INCLUDE NAMES omp.h PATHS "/usr/include")
-		endif()
-		if(LIBOMP_PATH AND LIBOMP_INCLUDE)
-			set(OpenMP_CXX_FLAGS "-fopenmp -I${LIBOMP_INCLUDE}" CACHE STRING "Manually set" FORCE)
-		endif()
 	endif()
 
 	# Set OpenMP-folders in case they are found with the aid of additional hints
@@ -301,9 +301,9 @@ if(NETWORKIT_PYTHON)
 			FIND_PACKAGE(Python3 ${NETWORKIT_PYTHON_VERSION} EXACT COMPONENTS Interpreter Development REQUIRED)
 		endif()
 	endif()
-
+	
 	foreach (EXT base centrality clique coarsening community components correlation
-			 distance dynamics embedding engineering flow generators globals graph graphio
+			 distance dynamics dynbase embedding engineering flow generators globals graph graphio
 			 graphtools helpers independentset linkprediction matching
 			 randomization reachability scd simulation sparsification stats
 			 structures traversal viz)
@@ -318,6 +318,7 @@ if(NETWORKIT_PYTHON)
 		target_include_directories(${TARGET_LIB} BEFORE PUBLIC "${PROJECT_SOURCE_DIR}/include")
 		target_include_directories(${TARGET_LIB} PRIVATE "${PROJECT_SOURCE_DIR}/extlibs/ttmath/")
 		target_include_directories(${TARGET_LIB} PRIVATE "${NETWORKIT_PYTHON}")
+		target_include_directories(${TARGET_LIB} PUBLIC "${NETWORKIT_NUMPY}")
 
 		if(NOT NETWORKIT_BUILD_CORE)
 			if(NOT EXTERNAL_NETWORKIT_CORE)
@@ -708,7 +709,7 @@ install(DIRECTORY include/networkit
 # Install ttmath header files
 install(DIRECTORY extlibs/ttmath/ttmath
 	DESTINATION ${NETWORKIT_INSTALL_INCLUDE_DIR}
-	FILES_MATCHING PATTERN "*.hpp")
+	FILES_MATCHING PATTERN "*.h")
 
 ################################################################################
 # Prepare pkg-config file

@@ -22,7 +22,7 @@ SimmelianScore::getRankedNeighborhood(const Graph &g, const std::vector<count> &
         // Sort ego's alters from strongly to weakly tied.
         g.forNeighborsOf(u, [&](node, node v, edgeid eid) {
             count triangleCount = std::round(triangles[eid]);
-            neighbors[u].push_back(RankedEdge(u, v, triangleCount));
+            neighbors[u].emplace_back(u, v, triangleCount);
         });
         std::sort(neighbors[u].begin(), neighbors[u].end());
 
@@ -84,30 +84,6 @@ void SimmelianScore::matchNeighbors(node, node alter, bool,
                                     const RankedNeighbors &egoNeighbors,
                                     std::unordered_set<node> &egoNeighborsUnmatched,
                                     std::unordered_set<node> &alterNeighborsUnmatched, count rank,
-                                    count &overlap) {
-
-    for (auto egoIt : egoNeighbors) {
-        node other = egoIt.alter;
-
-        if (other == alter || egoIt.rank != rank)
-            continue;
-
-        if (alterNeighborsUnmatched.erase(other))
-            overlap++;
-        else
-            egoNeighborsUnmatched.insert(other);
-    }
-}
-
-/**
- * Helper function used in getOverlap. Adds the intersection of
- * egoNeighbors and alterNeighborsUnmatched to overlap.
- */
-void SimmelianScore::matchNeighbors(node, node alter, bool,
-                                    std::vector<RankedEdge>::const_iterator &,
-                                    const RankedNeighbors &egoNeighbors,
-                                    std::set<node> &egoNeighborsUnmatched,
-                                    std::set<node> &alterNeighborsUnmatched, count rank,
                                     count &overlap) {
 
     for (auto egoIt : egoNeighbors) {

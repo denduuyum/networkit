@@ -11,6 +11,8 @@ from libcpp.limits cimport numeric_limits
 import math
 
 from .base cimport _Algorithm, Algorithm
+from .dynbase cimport _DynAlgorithm
+from .dynbase import DynAlgorithm
 from .dynamics cimport _GraphEvent, GraphEvent
 from .graph cimport _Graph, Graph
 from .structures cimport _Cover, Cover, _Partition, Partition, count, index, node, edgeweight
@@ -18,6 +20,10 @@ from networkit.algebraic import adjacencyEigenvector, PageRankMatrix, symmetricE
 
 cdef extern from "limits.h":
 	cdef uint64_t ULONG_MAX 
+
+cdef extern from "<networkit/Globals.hpp>" namespace "NetworKit":
+
+	index _none "NetworKit::none"
 
 cdef extern from "<networkit/centrality/Centrality.hpp>":
 
@@ -84,8 +90,8 @@ cdef class Centrality(Algorithm):
 
 		Returns
 		-------
-		dict(tuple(int, float))
-			A vector of pairs sorted into descending order. Each pair contains a node and the corresponding score
+		list(tuple(int, float))
+			A list of pairs sorted into descending order. Each pair contains a node and the corresponding score
 		"""
 		if self._this == NULL:
 			raise RuntimeError("Error, object not properly initialized")
@@ -195,13 +201,13 @@ cdef class ApproxBetweenness(Centrality):
 	G : networkit.Graph
 		The input graph
 	epsilon : double, optional
-		Maximum additive error
+		Maximum additive error. Default: 0.01
 	delta : double, optional
-		Probability that the values are within the error guarantee
+		Probability that the values are within the error guarantee. Default: 0.1
 	universalConstant: double, optional
 		The universal constant to be used in computing the sample size.
 		It is 1 by default. Some references suggest using 0.5, but there
-		is no guarantee in this case.
+		is no guarantee in this case. Default: 1.0
 	"""
 
 	def __cinit__(self, Graph G, epsilon=0.01, delta=0.1, universalConstant=1.0, _K=numeric_limits[edgeweight].max()):
@@ -249,7 +255,7 @@ cdef class EstimateBetweenness(Centrality):
 cdef extern from "<networkit/centrality/KadabraBetweenness.hpp>":
 
 	cdef cppclass _KadabraBetweenness "NetworKit::KadabraBetweenness" (_Algorithm):
-		_KadabraBetweenness(_Graph, double, double, count, count, count) except +
+		_KadabraBetweenness(_Graph, double, double, bool_t, count, count, count) except +
 		vector[pair[node, double]] ranking() except +
 		vector[node] topkNodesList() except +
 		vector[double] topkScoresList() except +
@@ -259,7 +265,7 @@ cdef extern from "<networkit/centrality/KadabraBetweenness.hpp>":
 
 cdef class KadabraBetweenness(Algorithm):
 	"""
-	KadabraBetweenness(Graph G, err = 0.01, delta = 0.1, k = 0, unionSample = 0, startFactor = 100
+	KadabraBetweenness(Graph G, err = 0.01, delta = 0.1, deterministic = False, k = 0, unionSample = 0, startFactor = 100
 
 	Approximation of the betweenness centrality and computation of the top-k
 	nodes with highest betweenness centrality according to the algorithm
@@ -298,6 +304,10 @@ cdef class KadabraBetweenness(Algorithm):
 	delta : float, optional
 		Probability that the values of the betweenness centrality are
 		within the error guarantee. Default: 0.1
+	deterministic : bool, optional
+		If True, the algorithm guarantees that the results of two different executions is the 
+		same for a fixed random seed, regardless of the number of threads. Note that this 
+		guarantee leads to increased computational and memory complexity. Default: False
 	k : int, optional
 		The number of top-k nodes to be computed. Set it to zero to
 		approximate the betweenness centrality of all the nodes. Default: 0
@@ -307,9 +317,9 @@ cdef class KadabraBetweenness(Algorithm):
 		Algorithm parameter. Default: 100
 	"""
 
-	def __cinit__(self, Graph G, err = 0.01, delta = 0.1, k = 0,
+	def __cinit__(self, Graph G, err = 0.01, delta = 0.1, deterministic = False, k = 0,
 				  unionSample = 0, startFactor = 100):
-		self._this = new _KadabraBetweenness(G._this, err, delta, k, unionSample,
+		self._this = new _KadabraBetweenness(G._this, err, delta, deterministic, k, unionSample,
 										   startFactor)
 
 	def ranking(self):
@@ -398,15 +408,13 @@ cdef class KadabraBetweenness(Algorithm):
 
 cdef extern from "<networkit/centrality/DynBetweenness.hpp>":
 
-	cdef cppclass _DynBetweenness "NetworKit::DynBetweenness"(_Algorithm):
+	cdef cppclass _DynBetweenness "NetworKit::DynBetweenness"(_Algorithm, _DynAlgorithm):
 		_DynBetweenness(_Graph) except +
-		void update(_GraphEvent) except +
-		void updateBatch(vector[_GraphEvent]) except +
 		vector[double] scores() except +
 		vector[pair[node, double]] ranking() except +
 		double score(node) except +
 
-cdef class DynBetweenness(Algorithm):
+cdef class DynBetweenness(Algorithm, DynAlgorithm):
 	""" 
 	DynBetweenness(G)
 	
@@ -423,35 +431,6 @@ cdef class DynBetweenness(Algorithm):
 	def __cinit__(self, Graph G):
 		self._G = G
 		self._this = new _DynBetweenness(G._this)
-
-	def update(self, ev):
-		"""
-		update(ev)
-		
-		Updates the betweenness centralities after the edge insertions.
-
-		Parameters
-		----------
-		ev : networkit.dynamics.GraphEvent
-			Update the Betweenness based on a given graph event.
-		"""
-		(<_DynBetweenness*>(self._this)).update(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-
-	def updateBatch(self, batch):
-		"""
-		updateBatch(batch)
-
-		Updates the betweenness centralities after the batch `batch` of edge insertions.
-
-		Parameters
-		----------
-		batch : list(networkit.dynamics.GraphEvent)
-			Update the Betweenness based on a given list of graph events.
-		"""
-		cdef vector[_GraphEvent] _batch
-		for ev in batch:
-			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-		(<_DynBetweenness*>(self._this)).updateBatch(_batch)
 
 	def scores(self):
 		""" 
@@ -500,16 +479,14 @@ cdef class DynBetweenness(Algorithm):
 
 cdef extern from "<networkit/centrality/DynApproxBetweenness.hpp>":
 
-	cdef cppclass _DynApproxBetweenness "NetworKit::DynApproxBetweenness"(_Algorithm):
+	cdef cppclass _DynApproxBetweenness "NetworKit::DynApproxBetweenness"(_Algorithm, _DynAlgorithm):
 		_DynApproxBetweenness(_Graph, double, double, bool_t, double) except +
-		void update(_GraphEvent) except +
-		void updateBatch(vector[_GraphEvent]) except +
 		vector[double] scores() except +
 		vector[pair[node, double]] ranking() except +
 		double score(node) except +
 		count getNumberOfSamples() except +
 
-cdef class DynApproxBetweenness(Algorithm):
+cdef class DynApproxBetweenness(Algorithm, DynAlgorithm):
 	""" 
 	DynApproxBetweenness(G, epsilon=0.01, delta=0.1, storePredecessors=True, universalConstant=1.0)
 	
@@ -541,35 +518,6 @@ cdef class DynApproxBetweenness(Algorithm):
 	def __cinit__(self, Graph G, epsilon=0.01, delta=0.1, storePredecessors = True, universalConstant=1.0):
 		self._G = G
 		self._this = new _DynApproxBetweenness(G._this, epsilon, delta, storePredecessors, universalConstant)
-
-	def update(self, ev):
-		""" 
-		update(ev)
-		
-		Updates the betweenness centralities after the edge insertions.
-
-		Parameters
-		----------
-		ev : networkit.dynamics.GraphEvent
-			Update the Betweenness based on a given graph event.
-		"""
-		(<_DynApproxBetweenness*>(self._this)).update(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-
-	def updateBatch(self, batch):
-		""" 
-		updateBatch(batch)
-		
-		Updates the betweenness centralities after the batch `batch` of edge insertions.
-
-		Parameters
-		----------
-		batch : list(networkit.dynamics.GraphEvent)
-			Update the Betweenness based on a given list of graph events.
-		"""
-		cdef vector[_GraphEvent] _batch
-		for ev in batch:
-			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-		(<_DynApproxBetweenness*>(self._this)).updateBatch(_batch)
 
 	def scores(self):
 		""" 
@@ -631,22 +579,19 @@ cdef class DynApproxBetweenness(Algorithm):
 
 cdef extern from "<networkit/centrality/DynBetweennessOneNode.hpp>":
 
-	cdef cppclass _DynBetweennessOneNode "NetworKit::DynBetweennessOneNode":
+	cdef cppclass _DynBetweennessOneNode "NetworKit::DynBetweennessOneNode"(_Algorithm, _DynAlgorithm):
 		_DynBetweennessOneNode(_Graph, node) except +
-		void run() nogil except +
-		void update(_GraphEvent) except +
-		void updateBatch(vector[_GraphEvent]) except +
 		double getDistance(node, node) except +
 		double getSigma(node, node) except +
 		double getSigmax(node, node) except +
 		double getbcx() except +
 
-cdef class DynBetweennessOneNode:
+cdef class DynBetweennessOneNode(Algorithm, DynAlgorithm):
 	""" 
 	DynBetweennessOneNode(G, x)
 	
 	Dynamic exact algorithm for updating the betweenness of a specific node.
-	The algorithm aupdates the betweenness of a node after an edge insertions
+	The algorithm updates the betweenness of a node after an edge insertion
 	(faster than updating it for all nodes), based on the algorithm
 	proposed by Bergamini et al. "Improving the betweenness centrality of a node by adding links"
 
@@ -657,7 +602,6 @@ cdef class DynBetweennessOneNode:
 	x : int
 		The node for which you want to update betweenness
 	"""
-	cdef _DynBetweennessOneNode* _this
 	cdef Graph _G
 
 	def __cinit__(self, Graph G, node):
@@ -667,40 +611,6 @@ cdef class DynBetweennessOneNode:
 	# this is necessary so that the C++ object gets properly garbage collected
 	def __dealloc__(self):
 		del self._this
-
-	def run(self):
-		with nogil:
-			self._this.run()
-		return self
-
-	def update(self, ev):
-		""" 
-		update(ev)
-		
-		Updates the betweenness centralities after the edge insertions.
-
-		Parameters
-		----------
-		ev : networkit.dynamics.GraphEvent
-			Update the Betweenness based on a given graph event.
-		"""
-		self._this.update(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-
-	def updateBatch(self, batch):
-		""" 
-		updateBatch(batch)
-		
-		Updates the betweenness centralities after the batch `batch` of edge insertions.
-
-		Parameters
-		----------
-		batch : list(networkit.dynamics.GraphEvent)
-			Update the Betweenness based on a given list of graph events.
-		"""
-		cdef vector[_GraphEvent] _batch
-		for ev in batch:
-			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-		self._this.updateBatch(_batch)
 
 	def getDistance(self, u, v):
 		""" 
@@ -713,7 +623,7 @@ cdef class DynBetweennessOneNode:
 		float
 			Distance between u and v.
 		"""
-		return self._this.getDistance(u, v)
+		return (<_DynBetweennessOneNode*>(self._this)).getDistance(u, v)
 
 	def getSigma(self, u, v):
 		"""
@@ -726,7 +636,7 @@ cdef class DynBetweennessOneNode:
 		int
 			Number of shortest paths between u and v.
 		"""
-		return self._this.getSigma(u, v)
+		return (<_DynBetweennessOneNode*>(self._this)).getSigma(u, v)
 
 	def getSigmax(self, u, v):
 		""" 
@@ -740,7 +650,7 @@ cdef class DynBetweennessOneNode:
 			Number of shortest paths between u and v that go through x.
 		
 		"""
-		return self._this.getSigmax(u, v)
+		return (<_DynBetweennessOneNode*>(self._this)).getSigmax(u, v)
 
 	def getbcx(self):
 		""" 
@@ -753,7 +663,7 @@ cdef class DynBetweennessOneNode:
 		float
 			Betweenness centrality score of x.
 		"""
-		return self._this.getbcx()
+		return (<_DynBetweennessOneNode*>(self._this)).getbcx()
 
 cdef extern from "<networkit/centrality/Closeness.hpp>" namespace "NetworKit::ClosenessVariant":
 
@@ -775,7 +685,7 @@ cdef extern from "<networkit/centrality/Closeness.hpp>":
 
 cdef class Closeness(Centrality):
 	"""
-	Closeness(G, normalized, checkConnectdedness)
+	Closeness(G, normalized, checkConnectedness)
 	Closeness(G, normalized, variant)
 
 	Constructs the Closeness class for the given Graph `G`. If the Closeness scores should not be normalized,
@@ -794,16 +704,16 @@ cdef class Closeness(Centrality):
 	normalized : bool
 		Set this parameter to False if scores should not be normalized into an interval of [0,1].
 		Normalization only works for unweighted graphs.
-	checkConnectdedness : bool
+	checkConnectedness : bool
 		Set this parameter to True to also check if the graph is connected before computing closeness.
 		Set this parameter to False to not check if the graph is connected (note: the standard definition
 		of closeness works for connected graphs, choose this if the input graph is known to be connected).
 	ClosenessVariant : networkit.centrality.ClosenessVariant
 		Set this parameter to networkit.centrality.ClosenessVariant.Standard to use the standard
-		definition of closeness, that is defined for connected graphs only; in this case, checkConnectdedness
+		definition of closeness, that is defined for connected graphs only; in this case, checkConnectedness
 		is automatically set to True.
 		Set this parameter to networkit.centrality.ClosenessVariant.Generalized to use the generalized
-		definition of closeness, that is defined for also non-connected graphs; in this case, checkConnectdedness
+		definition of closeness, that is defined for also non-connected graphs; in this case, checkConnectedness
 		is automatically set to False.
 	"""
 
@@ -1162,15 +1072,13 @@ cdef class TopHarmonicCloseness(Algorithm):
 
 cdef extern from "<networkit/centrality/DynTopHarmonicCloseness.hpp>":
 
-	cdef cppclass _DynTopHarmonicCloseness "NetworKit::DynTopHarmonicCloseness"(_Algorithm):
+	cdef cppclass _DynTopHarmonicCloseness "NetworKit::DynTopHarmonicCloseness"(_Algorithm, _DynAlgorithm):
 		_DynTopHarmonicCloseness(_Graph G, count, bool_t) except +
 		vector[pair[node, edgeweight]] ranking(bool_t) except +
 		vector[node] topkNodesList(bool_t) except +
 		vector[edgeweight] topkScoresList(bool_t) except +
-		void update(_GraphEvent) except +
-		void updateBatch(vector[_GraphEvent]) except +
 
-cdef class DynTopHarmonicCloseness(Algorithm):
+cdef class DynTopHarmonicCloseness(Algorithm, DynAlgorithm):
 	""" 
 	DynTopHarmonicCloseness(G, k=1, useBFSbound=True)
 	
@@ -1269,35 +1177,6 @@ cdef class DynTopHarmonicCloseness(Algorithm):
 		return (<_DynTopHarmonicCloseness*>(self._this)).topkScoresList(includeTrail)
 
 
-
-	def update(self, ev):
-		""" 
-		update(ev)
-		
-		Updates the betweenness centralities after the edge insertions.
-
-		Parameters
-		----------
-		ev : networkit.dynamics.GraphEvent
-			Update the Betweenness based on a given graph event.
-		"""
-		(<_DynTopHarmonicCloseness*>(self._this)).update(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-
-	def updateBatch(self, batch):
-		""" 
-		updateBatch(batch)
-		
-		Updates the betweenness centralities after the batch `batch` of edge insertions.
-
-		Parameters
-		----------
-		batch : list(networkit.dynamics.GraphEvent)
-			Update the Betweenness based on a given list of graph events.
-		"""
-		cdef vector[_GraphEvent] _batch
-		for ev in batch:
-			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-		(<_DynTopHarmonicCloseness*>(self._this)).updateBatch(_batch)
 
 cdef extern from "<networkit/centrality/LocalPartitionCoverage.hpp>":
 
@@ -2055,10 +1934,8 @@ cdef class KatzCentrality(Centrality):
 
 cdef extern from "<networkit/centrality/DynKatzCentrality.hpp>":
 
-	cdef cppclass _DynKatzCentrality "NetworKit::DynKatzCentrality" (_Centrality):
+	cdef cppclass _DynKatzCentrality "NetworKit::DynKatzCentrality" (_Centrality, _DynAlgorithm):
 		_DynKatzCentrality(_Graph G, count, bool_t, double) except +
-		void update(_GraphEvent) except +
-		void updateBatch(vector[_GraphEvent]) except +
 		node top(count) except +
 		double bound(node) except +
 		bool_t areDistinguished(node, node) except +
@@ -2084,35 +1961,6 @@ cdef class DynKatzCentrality(Centrality):
 	def __cinit__(self, Graph G, k, groupOnly=False, tolerance=1e-9):
 		self._G = G
 		self._this = new _DynKatzCentrality(G._this, k, groupOnly, tolerance)
-
-	def update(self, ev):
-		""" 
-		update(ev)
-		
-		Updates the centralities after the edge insertions.
-
-		Parameters
-		----------
-		ev : networkit.dynamics.GraphEvent
-			Update the Betweenness based on a given graph event.
-		"""
-		(<_DynKatzCentrality*>(self._this)).update(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-
-	def updateBatch(self, batch):
-		""" 
-		updateBatch(batch)
-		
-		Updates the centralities after the batch `batch` of edge insertions.
-
-		Parameters
-		----------
-		batch : list(networkit.dynamics.GraphEvent)
-			Update the Betweenness based on a given list of graph events.
-		"""
-		cdef vector[_GraphEvent] _batch
-		for ev in batch:
-			_batch.push_back(_GraphEvent(ev.type, ev.u, ev.v, ev.w))
-		(<_DynKatzCentrality*>(self._this)).updateBatch(_batch)
 
 	def top(self, n=0):
 		""" 
@@ -2656,10 +2504,10 @@ cdef class ApproxElectricalCloseness(Centrality):
 	G : networkit.Graph
 		The input graph.
 	eps : float, optional
-		Maximum absolute error of the elements in the diagonal.
+		Maximum absolute error of the elements in the diagonal. Default: 0.1
 	kappa : float, optional
 		Balances the tolerance of the solver for the linear system and the
-		number of USTs to be sampled.
+		number of USTs to be sampled. Default: 0.3
 	"""
 
 	def __cinit__(self, Graph G, double eps = 0.1, double kappa = 0.3):
@@ -2690,7 +2538,7 @@ cdef class ApproxElectricalCloseness(Centrality):
 		Parameters
 		----------
 		tol : float
-			Tolerance for the LAMG solver.
+			Tolerance for the LAMG solver. Default: 1e-9
 
 		Returns
 		-------
@@ -3086,3 +2934,117 @@ class SciPyPageRank(SpectralCentrality):
 
 		self.eigenvector = spectrum[1][0]
 		self.eigenvalue = spectrum[0][0]
+
+cdef extern from "<networkit/centrality/ComplexPaths.hpp>" namespace "NetworKit::ComplexPathAlgorithm":
+
+	cdef enum _Mode  "NetworKit::ComplexPathAlgorithm::Mode":
+		singleNode,
+		allNodes,
+
+cdef class ComplexPathMode(object):
+	SINGLE_NODE = _Mode.singleNode
+	ALL_NODES   = _Mode.allNodes
+
+cdef extern from "<networkit/centrality/ComplexPaths.hpp>":
+	cdef cppclass _ComplexPaths "NetworKit::ComplexPathAlgorithm"(_Algorithm):
+		_ComplexPaths(_Graph G, count threshold, _Mode mode, node start) except +
+		vector[double] getPLci() except +
+		void normalize() except +
+		vector[node] getAdopters() except +
+		_Graph &getComplexGraph() except +
+
+cdef class ComplexPaths(Algorithm):
+	""" 
+	ComplexPaths(G, threshold, mode, start)
+
+	The ComplexPathAlgorithm analysis the spread of complex contagions in a given graph. 
+	Returns the complex contagion paths of a given phenomenon (determined by the threshold) 
+	for single nodes or the entire graph, according to:
+	[ Guilbeault, D., Centola, D. Topological measures for 
+	  identifying and predicting the spread of complex contagions. 
+	  Nat Commun 12, 4430 (2021). 
+	  https://doi.org/10.1038/s41467-021-24704-6 ]
+ 
+	Parameters
+	----------
+	G : networkit.Graph
+		The graph.
+
+	threshold : int
+		The complex path width: minimal number of neighbors.
+
+	Parameter :code:`mode` can be one of the following:
+
+	- ComplexPathMode.allNodes: Calculate complex path lengths
+					  from every start node(default).
+	- ComplexPathMode.singleNode: Calculate complex path graph
+					  from node start.
+	
+	start : node
+		Start node for ComplexPathMode.singleNode.
+	"""
+
+	cdef Graph _G
+
+	def __cinit__(self, Graph G, threshold=3, mode="allNodes", start=_none):
+		if mode=="allNodes":
+			mode=ComplexPathMode.ALL_NODES
+		if mode=="singleNode":
+			mode=ComplexPathMode.SINGLE_NODE
+		self._G = G
+		self._this = new _ComplexPaths(G._this, threshold, mode, start)
+
+	def getPLci(self):
+		""" 
+		getPLci()
+
+		Returns complex path lengths for every node in G either with 
+		absolute length, or scaled to [0,1] when normalize() was called before run().
+		Only available when called in mode ComplexPathMode.ALL_NODES.
+
+		Returns
+		-------
+		list(float)
+			A vector containing complex path lengths for all nodes.
+		"""
+		return (<_ComplexPaths*>(self._this)).getPLci()
+
+	def getComplexGraph(self):
+		""" 
+		getComplexGraph()
+
+		Returns complex path (sub)graph of G starting in the node start.
+		Only available when called in mode ComplexPathMode.SINGLE_NODE.
+
+		Returns
+		-------
+		Graph	
+		"""
+		return Graph().setThis((<_ComplexPaths*>(self._this)).getComplexGraph())
+
+	def getAdopters(self):
+		"""
+		getAdopters()
+
+		Returns all nodes in the complex subgraph with at least
+		threshold neighbors (those who are adopted/infected when 
+		starting in start).
+
+		Returns
+		-------
+		list(int) 
+			A vector of all adopted/infected nodes.
+		"""
+		return (<_ComplexPaths*>(self._this)).getAdopters()
+
+	def normalize(self):
+		"""
+		normalize()
+
+		When called before run() all complex path lengths returned by getPLci() are scaled to [0,1].
+		Only available when called in mode ComplexPathMode.ALL_NODES.
+
+		"""
+		return (<_ComplexPaths*>(self._this)).normalize()
+
+

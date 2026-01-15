@@ -77,20 +77,29 @@ cdef extern from "<networkit/generators/BarabasiAlbertGenerator.hpp>":
 
 	cdef cppclass _BarabasiAlbertGenerator "NetworKit::BarabasiAlbertGenerator"(_StaticGraphGenerator):
 		_BarabasiAlbertGenerator() except +
-		_BarabasiAlbertGenerator(count k, count nMax, count n0, bool_t batagelj) except +
-		_BarabasiAlbertGenerator(count k, count nMax, const _Graph & initGraph, bool_t batagelj) except +
+		_BarabasiAlbertGenerator(count k, count nMax, count n0, bool_t parallel) except +
+		_BarabasiAlbertGenerator(count k, count nMax, const _Graph & initGraph, bool_t parallel) except +
 
 cdef class BarabasiAlbertGenerator(StaticGraphGenerator):
 	"""
-	BarabasiAlbertGenerator(k, nMax, n0=0, batagelj=True)
+	BarabasiAlbertGenerator(k, nMax, n0=0, sequential=True)
 
-	This generator implements the preferential attachment model as introduced by Barabasi and Albert[1].
-	The original algorithm is very slow and thus, the much faster method from Batagelj and Brandes[2] is
-	implemented and the current default.
-	The original method can be chosen by setting \p batagelj to false.
-	[1] Barabasi, Albert: Emergence of Scaling in Random Networks http://arxiv.org/pdf/cond-mat/9910332.pdf
-	[2] ALG 5 of Batagelj, Brandes: Efficient Generation of Large Random Networks https://kops.uni-konstanz.de/bitstream/handle/123456789/5799/random.pdf?sequence=1
+	This generator uses the preferential attachment model as introduced by Barabasi and
+	Albert[1], implemented in the much faster method from Batagelj and Brandes[2] per default
+	where the running time is O(n+m). Furthermore there is a parallel version from Sanders and
+	Schulz[3] implemented. This implementation can be selected by setting sequential=false. 
+	Empirically, the parallel version shows better runtimes (when executed multi-threaded).
 
+	[1] Barabasi, Albert: [Emergence of Scaling in Random Networks]
+		(http://arxiv.org/pdf/cond-mat/9910332.pdf)
+	[2] ALG 5 of Batagelj, Brandes: [Efficient Generation of Large Random Networks]
+		(https://kops.uni-konstanz.de/bitstream/handle/123456789/5799/random.pdf?sequence=1)
+	[3] Peter Sanders, Christian Schulz: [Scalable generation of scale-free graphs]
+		(https://www.sciencedirect.com/science/article/pii/S0020019016300102)
+
+	The generator will emit a simple graph, where all
+    new nodes are initially connected to k random neighbors.
+    	
 	Parameters
 	----------
 	k : int
@@ -98,16 +107,16 @@ cdef class BarabasiAlbertGenerator(StaticGraphGenerator):
 	nMax : int
 		Maximum number of nodes produced.
 	n0 : int or networkit.Graph
-		Number of starting nodes or the initial starting graph.
-	batagelj : bool
-		Specifies whether to use batagelj's method or the original one.
+		Number of starting nodes or the initial starting graph. Default: 0
+	sequential : bool
+		Specifies whether to compute sequentially using batagelj's method or in parallel (if the number of threads allow for it). Default=True
 	"""
 
-	def __cinit__(self, count k, count nMax, n0=0, bool_t batagelj=True):
+	def __cinit__(self, count k, count nMax, n0=0, bool_t sequential=True):
 		if isinstance(n0, Graph):
-			self._this = new _BarabasiAlbertGenerator(k, nMax, (<Graph>n0)._this, batagelj)
+			self._this = new _BarabasiAlbertGenerator(k, nMax, (<Graph>n0)._this, sequential)
 		else:
-			self._this = new _BarabasiAlbertGenerator(k, nMax, <count>n0, batagelj)
+			self._this = new _BarabasiAlbertGenerator(k, nMax, <count>n0, sequential)
 
 	@classmethod
 	def fit(cls, Graph G, scale=1):
@@ -569,11 +578,11 @@ cdef class HyperbolicGenerator(StaticGraphGenerator):
 		Parameters
 		----------
 		angles : list(float)
-			List with angles of node positions
+			List with angles of node positions.
 		radii : list(float)
-			List with radii of node positions
-		r : float
-			Radius of poincare disk to place nodes in
+			List with radii of node positions.
+		R : float
+			Radius of poincare disk to place nodes in.
 		T : float, optional
 			Edges are added for nodes closer to each other than threshold T. Default: 0.0
 		"""
@@ -610,14 +619,14 @@ cdef extern from "<networkit/generators/PowerlawDegreeSequence.hpp>":
 		_PowerlawDegreeSequence(count minDeg, count maxDeg, double gamma) except +
 		_PowerlawDegreeSequence(_Graph) except +
 		_PowerlawDegreeSequence(vector[double]) except +
-		void setMinimumFromAverageDegree(double avgDeg) nogil except +
-		void setGammaFromAverageDegree(double avgDeg, double minGamma, double maxGamma) nogil except +
+		void setMinimumFromAverageDegree(double avgDeg) except + nogil
+		void setGammaFromAverageDegree(double avgDeg, double minGamma, double maxGamma) except + nogil
 		double getExpectedAverageDegree() except +
 		count getMinimumDegree() const
 		count getMaximumDegree() const
 		double getGamma() const
 		double setGamma(double) const
-		void run() nogil except +
+		void run() except + nogil
 		vector[count] getDegreeSequence(count numNodes) except +
 		count getDegree() except +
 
@@ -653,10 +662,11 @@ cdef class PowerlawDegreeSequence:
 	def __cinit__(self, minDeg, count maxDeg = 0, double gamma = -2):
 		if isinstance(minDeg, Graph):
 			self._this = new _PowerlawDegreeSequence((<Graph>minDeg)._this)
-		try:
-			self._this = new _PowerlawDegreeSequence(<vector[double]?>minDeg)
-		except TypeError:
-			self._this = new _PowerlawDegreeSequence((<count?>minDeg), maxDeg, gamma)
+		else:
+			try:
+				self._this = new _PowerlawDegreeSequence(<vector[double]?>minDeg)
+			except TypeError:
+				self._this = new _PowerlawDegreeSequence((<count?>minDeg), maxDeg, gamma)
 
 	def __dealloc__(self):
 		del self._this
@@ -806,14 +816,14 @@ cdef extern from "<networkit/generators/LFRGenerator.hpp>":
 
 	cdef cppclass _LFRGenerator "NetworKit::LFRGenerator"(_Algorithm):
 		_LFRGenerator(count n) except +
-		void setDegreeSequence(vector[count] degreeSequence) nogil except +
-		void generatePowerlawDegreeSequence(count avgDegree, count maxDegree, double nodeDegreeExp) nogil except +
-		void setCommunitySizeSequence(vector[count] communitySizeSequence) nogil except +
-		void setPartition(_Partition zeta) nogil except +
-		void generatePowerlawCommunitySizeSequence(count minCommunitySize, count maxCommunitySize, double communitySizeExp) nogil except +
-		void setMu(double mu) nogil except +
-		void setMu(const vector[double] & mu) nogil except +
-		void setMuWithBinomialDistribution(double mu) nogil except +
+		void setDegreeSequence(vector[count] degreeSequence) except + nogil
+		void generatePowerlawDegreeSequence(count avgDegree, count maxDegree, double nodeDegreeExp) except + nogil
+		void setCommunitySizeSequence(vector[count] communitySizeSequence) except + nogil
+		void setPartition(_Partition zeta) except + nogil
+		void generatePowerlawCommunitySizeSequence(count minCommunitySize, count maxCommunitySize, double communitySizeExp) except + nogil
+		void setMu(double mu) except + nogil
+		void setMu(const vector[double] & mu) except + nogil
+		void setMuWithBinomialDistribution(double mu) except + nogil
 		_Graph getGraph() except +
 		_Partition getPartition() except +
 		_Graph generate() except +
@@ -987,7 +997,7 @@ cdef class LFRGenerator(Algorithm):
 		Parameters
 		----------
 		useReferenceImplementation : bool
-			Sets whether the reference implmentation should be used for generating. 
+			Sets whether the reference implmentation should be used for generating. Default: False
 
 		Returns
 		-------
@@ -1254,7 +1264,7 @@ cdef class HavelHakimiGenerator(StaticGraphGenerator):
 	sequence : list(int)
 		Degree sequence to realize. Must be non-increasing.
 	ignoreIfRealizable : bool, optional
-		If True, generate the graph even if the degree sequence is not realizable. Some nodes may get lower degrees than requested in the sequence.
+		If True, generate the graph even if the degree sequence is not realizable. Some nodes may get lower degrees than requested in the sequence. Default: True
 	"""
 
 	def __cinit__(self, vector[count] degreeSequence, ignoreIfRealizable=True):
@@ -1310,15 +1320,15 @@ cdef class DynamicHyperbolicGenerator:
 	numNodes : int
 		Number of nodes.
 	avgDegree : float
-		Average degree of the resulting graph.
+		Average degree of the resulting graph. Default: 6.0
 	gamma : float
-		Power-law exponent of the resulting graph.
+		Power-law exponent of the resulting graph. Default: 3.0
 	T : float
-		Temperature, selecting a graph family on the continuum between hyperbolic unit disk graphs and Erdos-Renyi graphs.
+		Temperature, selecting a graph family on the continuum between hyperbolic unit disk graphs and Erdos-Renyi graphs. Default: 0.0
 	moveEachStep : float
-		Fraction of nodes to be moved in each time step. The nodes are chosen randomly each step.
+		Fraction of nodes to be moved in each time step. The nodes are chosen randomly each step. Default: 1.0
 	moveDistance: float
-		Base value for the node movements.
+		Base value for the node movements. Default: 0.1
 	"""
 	cdef _DynamicHyperbolicGenerator* _this
 
@@ -1445,7 +1455,7 @@ cdef class RmatGenerator(StaticGraphGenerator):
 	weighted : bool, optional
 		Indicates whether the resulting graph should be weighted. Default: False
 	reduceNodes : int, optional
-		The number of nodes, which should be deleted from the generated graph.
+		The number of nodes, which should be deleted from the generated graph. Default: 0
 	"""
 	paths = {"kronfitPath" : None}
 
@@ -1558,7 +1568,7 @@ cdef class DynamicForestFireGenerator:
 	directed : bool
 		Decides whether the resulting graph should be directed.
 	r : float, optional
-		Backward burning probability.
+		Backward burning probability. Default 1.0
 	"""
 	cdef _DynamicForestFireGenerator* _this
 

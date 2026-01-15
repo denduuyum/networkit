@@ -6,6 +6,7 @@
  */
 
 #include <queue>
+#include <span>
 
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/auxiliary/NumericTools.hpp>
@@ -87,12 +88,11 @@ void DynDijkstra::run() {
 }
 
 void DynDijkstra::update(GraphEvent e) {
-    std::vector<GraphEvent> batch(1);
-    batch[0] = e;
+    std::vector<GraphEvent> batch = {e};
     updateBatch(batch);
 }
 
-void DynDijkstra::updateBatch(const std::vector<GraphEvent> &batch) {
+void DynDijkstra::updateBatch(std::span<const GraphEvent> batch) {
     mod = false;
     // priority queue with distance-node pairs
     updateHeap.clear();
@@ -149,6 +149,11 @@ void DynDijkstra::updateBatch(const std::vector<GraphEvent> &batch) {
     while (!updateHeap.empty()) {
         mod = true;
         node current = updateHeap.extract_top();
+        // the previous vector for the current node is potentially outdated and will be refilled
+        // during the update
+        if (storePreds) {
+            previous[current].clear();
+        }
         if (color[current] == BLACK
             && Aux::NumericTools::logically_equal(updateDistances[current], distances[current])) {
             auto tmp = npaths[current];

@@ -9,10 +9,10 @@
 #include <ctime>
 #include <memory>
 #include <queue>
+#include <span>
 #include <unordered_set>
 
 #include <networkit/auxiliary/Log.hpp>
-#include <networkit/auxiliary/NumericTools.hpp>
 #include <networkit/distance/APSP.hpp>
 #include <networkit/distance/BFS.hpp>
 #include <networkit/distance/Dijkstra.hpp>
@@ -21,7 +21,7 @@
 
 namespace NetworKit {
 
-DynAPSP::DynAPSP(Graph &G) : APSP(G) {}
+DynAPSP::DynAPSP(const Graph &G) : APSP(G) {}
 
 /**
  * Run method that stores a single shortest path for each node pair and stores shortest distances
@@ -154,8 +154,8 @@ void DynAPSP::update(GraphEvent event) {
     }
 }
 
-void DynAPSP::updateBatch(const std::vector<GraphEvent> &batch) {
-    for (auto e : batch) {
+void DynAPSP::updateBatch(std::span<const GraphEvent> batch) {
+    for (const auto &e : batch) {
         update(e);
     }
 }

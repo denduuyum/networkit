@@ -8,8 +8,8 @@
 #ifndef NETWORKIT_CENTRALITY_DYN_BETWEENNESS_HPP_
 #define NETWORKIT_CENTRALITY_DYN_BETWEENNESS_HPP_
 
-#include <memory>
 #include <queue>
+#include <span>
 
 #include <networkit/auxiliary/PrioQueue.hpp>
 #include <networkit/base/DynAlgorithm.hpp>
@@ -61,7 +61,7 @@ public:
      *
      * @param batch The batch of edge insertions.
      */
-    void updateBatch(const std::vector<GraphEvent> &batch) override;
+    void updateBatch(std::span<const GraphEvent> batch) override;
 
     /** Returns number of visited pairs */
     count visPairs();

@@ -5,12 +5,14 @@
  *      Author: Christian Staudt (christian.staudt@kit.edu)
  */
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cassert>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -18,6 +20,7 @@
 #include <vector>
 
 #include <networkit/algebraic/CSRMatrix.hpp>
+#include <networkit/algebraic/MatrixTools.hpp>
 #include <networkit/generators/ErdosRenyiGenerator.hpp>
 #include <networkit/io/BinaryEdgeListPartitionReader.hpp>
 #include <networkit/io/BinaryEdgeListPartitionWriter.hpp>
@@ -39,13 +42,14 @@
 #include <networkit/io/KONECTGraphReader.hpp>
 #include <networkit/io/METISGraphReader.hpp>
 #include <networkit/io/METISGraphWriter.hpp>
+#include <networkit/io/MTXGraphReader.hpp>
 #include <networkit/io/MatrixMarketReader.hpp>
 #include <networkit/io/NetworkitBinaryGraph.hpp>
 #include <networkit/io/NetworkitBinaryReader.hpp>
 #include <networkit/io/NetworkitBinaryWriter.hpp>
 #include <networkit/io/PartitionReader.hpp>
 #include <networkit/io/PartitionWriter.hpp>
-#include <networkit/io/SNAPEdgeListPartitionReader.hpp>
+#include <networkit/io/RBMatrixReader.hpp>
 #include <networkit/io/SNAPGraphReader.hpp>
 #include <networkit/io/SNAPGraphWriter.hpp>
 #include <networkit/io/ThrillGraphBinaryReader.hpp>
@@ -668,6 +672,36 @@ TEST_F(IOGTest, testGraphToolBinaryWriter) {
     EXPECT_EQ(G.isWeighted(), Gread.isWeighted());
 }
 
+TEST_F(IOGTest, testGraphToolBinaryWriterDifferentGraphSizes) {
+    GraphToolBinaryWriter writer;
+    GraphToolBinaryReader reader;
+    std::string path = "output/test.gt";
+    // less than 8 nodes
+    Graph G0(3, false, false);
+    writer.write(G0, path);
+    Graph G0read = reader.read(path);
+    EXPECT_EQ(G0.numberOfNodes(), G0read.numberOfNodes());
+    EXPECT_EQ(G0.numberOfEdges(), G0read.numberOfEdges());
+    EXPECT_EQ(G0.isDirected(), G0read.isDirected());
+    EXPECT_EQ(G0.isWeighted(), G0read.isWeighted());
+    // less than 2^16 nodes
+    Graph G1(30000, false, false);
+    writer.write(G1, path);
+    Graph G1read = reader.read(path);
+    EXPECT_EQ(G1.numberOfNodes(), G1read.numberOfNodes());
+    EXPECT_EQ(G1.numberOfEdges(), G1read.numberOfEdges());
+    EXPECT_EQ(G1.isDirected(), G1read.isDirected());
+    EXPECT_EQ(G1.isWeighted(), G1read.isWeighted());
+    // less than 2^32 nodes
+    Graph G2(100000, false, true);
+    writer.write(G2, path);
+    Graph G2read = reader.read(path);
+    EXPECT_EQ(G2.numberOfNodes(), G2read.numberOfNodes());
+    EXPECT_EQ(G2.numberOfEdges(), G2read.numberOfEdges());
+    EXPECT_EQ(G2.isDirected(), G2read.isDirected());
+    EXPECT_EQ(G2.isWeighted(), G2read.isWeighted());
+}
+
 TEST_F(IOGTest, testGraphToolBinaryWriterWithDeletedNodes) {
     Graph G(10, false, false);
     G.removeNode(0);
@@ -1245,6 +1279,35 @@ TEST_F(IOGTest, testNetworkitWriterNonContinuousNodesIds) {
     });
 }
 
+TEST_F(IOGTest, testRBMatrixReader) {
+    RBMatrixReader reader;
+    auto csrRB = reader.read("input/tiny_05.rb");
+    auto csrMM = MatrixMarketReader{}.read("input/tiny_05.matrixmarket");
+    EXPECT_EQ(csrRB, csrMM);
+}
+
+TEST_F(IOGTest, testRBGraphReader) {
+    RBGraphReader reader;
+    auto graphRB = reader.read("input/tiny_05.rb");
+    auto graphMM = MTXGraphReader{}.read("input/tiny_05.matrixmarket");
+
+    EXPECT_EQ(graphRB.numberOfNodes(), graphMM.numberOfNodes());
+    EXPECT_EQ(graphRB.numberOfEdges(), graphMM.numberOfEdges());
+    EXPECT_EQ(graphRB.numberOfSelfLoops(), graphMM.numberOfSelfLoops());
+    EXPECT_EQ(graphRB.isWeighted(), graphMM.isWeighted());
+    EXPECT_EQ(graphRB.isDirected(), graphMM.isDirected());
+
+    graphRB.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(graphMM.hasEdge(u, v));
+        EXPECT_EQ(graphMM.weight(u, v), w);
+    });
+
+    graphMM.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(graphRB.hasEdge(u, v));
+        EXPECT_EQ(graphRB.weight(u, v), w);
+    });
+}
+
 TEST_F(IOGTest, testMatrixMarketReaderUnweightedUndirected) {
     CSRMatrix csr = MatrixMarketReader{}.read("input/chesapeake.mtx");
     EXPECT_EQ(csr.numberOfRows(), 39);
@@ -1257,6 +1320,16 @@ TEST_F(IOGTest, testMatrixMarketReaderUnweightedUndirected) {
     EXPECT_EQ(csr(26, 13), 1.0);
     csr.forNonZeroElementsInRowOrder(
         [&](index i, index j, double) { EXPECT_EQ(csr(i, j), csr(j, i)); });
+
+    // check that the MTXGraphReader is equivalent
+    Graph G = MTXGraphReader{}.read("input/chesapeake.mtx");
+    Graph G_from_csr = MatrixTools::matrixToGraph(csr);
+    EXPECT_EQ(G.numberOfNodes(), G_from_csr.numberOfNodes());
+    EXPECT_EQ(G.numberOfEdges(), G_from_csr.numberOfEdges());
+    G.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(G_from_csr.hasEdge(u, v));
+        EXPECT_EQ(G_from_csr.weight(u, v), w);
+    });
 }
 
 TEST_F(IOGTest, testMatrixMarketReaderUnweightedDirected) {
@@ -1269,6 +1342,16 @@ TEST_F(IOGTest, testMatrixMarketReaderUnweightedDirected) {
     EXPECT_EQ(csr(3, 9), 1.0);
     EXPECT_EQ(csr(11, 12), 1.0);
     EXPECT_EQ(csr(17, 13), 1.0);
+
+    // check that the MTXGraphReader is equivalent
+    Graph G = MTXGraphReader{}.read("input/GD01_b.mtx");
+    Graph G_from_csr = MatrixTools::matrixToGraph(csr);
+    EXPECT_EQ(G.numberOfNodes(), G_from_csr.numberOfNodes());
+    EXPECT_EQ(G.numberOfEdges(), G_from_csr.numberOfEdges());
+    G.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(G_from_csr.hasEdge(u, v));
+        EXPECT_EQ(G_from_csr.weight(u, v), w);
+    });
 }
 
 TEST_F(IOGTest, testMatrixMarketReaderWeightedUndirected) {
@@ -1284,6 +1367,16 @@ TEST_F(IOGTest, testMatrixMarketReaderWeightedUndirected) {
     EXPECT_EQ(csr(13, 11), 94.2528);
     csr.forNonZeroElementsInRowOrder(
         [&](index i, index j, double) { EXPECT_EQ(csr(i, j), csr(j, i)); });
+
+    // check that the MTXGraphReader is equivalent
+    Graph G = MTXGraphReader{}.read("input/LFAT5.mtx");
+    Graph G_from_csr = MatrixTools::matrixToGraph(csr);
+    EXPECT_EQ(G.numberOfNodes(), G_from_csr.numberOfNodes());
+    EXPECT_EQ(G.numberOfEdges(), G_from_csr.numberOfEdges());
+    G.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(G_from_csr.hasEdge(u, v));
+        EXPECT_EQ(G_from_csr.weight(u, v), w);
+    });
 }
 
 TEST_F(IOGTest, testMatrixMarketReaderWeightedDirected) {
@@ -1296,6 +1389,16 @@ TEST_F(IOGTest, testMatrixMarketReaderWeightedDirected) {
     EXPECT_EQ(csr(5, 9), -0.2039265503510711);
     EXPECT_EQ(csr(9, 16), 0.2213493690543944);
     EXPECT_EQ(csr(11, 23), 0.04492168652740657);
+
+    // check that the MTXGraphReader is equivalent
+    Graph G = MTXGraphReader{}.read("input/Hamrle1.mtx");
+    Graph G_from_csr = MatrixTools::matrixToGraph(csr);
+    EXPECT_EQ(G.numberOfNodes(), G_from_csr.numberOfNodes());
+    EXPECT_EQ(G.numberOfEdges(), G_from_csr.numberOfEdges());
+    G.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(G_from_csr.hasEdge(u, v));
+        EXPECT_EQ(G_from_csr.weight(u, v), w);
+    });
 }
 
 TEST_F(IOGTest, testMatrixMarketReaderIntegerWeights) {
@@ -1308,6 +1411,40 @@ TEST_F(IOGTest, testMatrixMarketReaderIntegerWeights) {
     EXPECT_EQ(csr(23, 9), 2.0);
     EXPECT_EQ(csr(4, 10), 4.0);
     EXPECT_EQ(csr(21, 21), 6.0);
+
+    // check that the MTXGraphReader is equivalent
+    Graph G = MTXGraphReader{}.read("input/Ragusa16.mtx");
+    Graph G_from_csr = MatrixTools::matrixToGraph(csr);
+    EXPECT_EQ(G.numberOfNodes(), G_from_csr.numberOfNodes());
+    EXPECT_EQ(G.numberOfEdges(), G_from_csr.numberOfEdges());
+    G.forEdges([&](node u, node v, edgeweight w) {
+        EXPECT_TRUE(G_from_csr.hasEdge(u, v));
+        EXPECT_EQ(G_from_csr.weight(u, v), w);
+    });
 }
 
+MATCHER_P(GraphFeaturesEqual, expected, "Graph matches expected features") {
+    return arg.numberOfNodes() == expected.numberOfNodes()
+           && arg.numberOfEdges() == expected.numberOfEdges()
+           && arg.isWeighted() == expected.isWeighted() && arg.isDirected() == expected.isDirected()
+           && arg.hasEdgeIds() == expected.hasEdgeIds();
+}
+
+TEST_F(IOGTest, testNetworkitBinaryWriteReadEmptyGraph) {
+    Graph graph(0, false, true);
+    const std::filesystem::path path = "output/empty_graph.nkb";
+    NetworkitBinaryWriter{}.write(graph, path.string());
+
+    const Graph graph_read = NetworkitBinaryReader{}.read(path.string());
+    EXPECT_THAT(graph_read, GraphFeaturesEqual(graph));
+}
+
+TEST_F(IOGTest, testNetworkitBinaryWriteReadEmptyGraphWithIndexes) {
+    Graph graph(0, true, false, true);
+    const std::filesystem::path path = "output/empty_graph.nkb";
+    NetworkitBinaryWriter{}.write(graph, path.string());
+
+    const Graph graph_read = NetworkitBinaryReader{}.read(path.string());
+    EXPECT_THAT(graph_read, GraphFeaturesEqual(graph));
+}
 } /* namespace NetworKit */

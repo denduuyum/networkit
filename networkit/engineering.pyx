@@ -11,10 +11,10 @@ from .structures cimport index, node
 
 # local imports
 from .helpers import stdstring, pystring
-from . import stopwatch
 
 # external imports
 import csv
+import timeit
 import warnings
 
 cdef extern from "<networkit/Globals.hpp>" namespace "NetworKit":
@@ -34,6 +34,12 @@ def setNumberOfThreads(nThreads):
 	setNumberOfThreads(nThreads)
 
 	Set the number of OpenMP threads
+
+	Parameters
+	----------
+	nThreads : int
+		Number of threads.
+
 	"""
 	_setNumberOfThreads(nThreads)
 
@@ -167,14 +173,14 @@ def strongScaling(algorithmClass, threadSequence, inargs, inputTitle=None, repet
 		for r in range(repetitions):
 			algorithm = algorithmClass(**inargs)
 			print("running algorithm")
-			timer = stopwatch.Timer()
+			timer = timeit.default_timer()
 			result = algorithm.run()
-			timer.stop()
-			print("elapsed time: {0}".format(timer.elapsed))
+			timerElapsed = timeit.default_timer() - timer
+			print("elapsed time: {0}".format(timerElapsed))
 			if inputTitle is None:
 				inputTitle = str(input)
 			# append run data
-			data.append({"input": inputTitle, "threads": nThreads, "time": timer.elapsed})
+			data.append({"input": inputTitle, "threads": nThreads, "time": timerElapsed})
 	setNumberOfThreads(threadsAvailable)
 	if outPath:
 		with open(outPath, "w") as outFile:
@@ -222,11 +228,11 @@ def weakScaling(algorithmClass, inargs, threadSequence, inputSequence, inputTitl
 		for r in range(repetitions):
 			algorithm = algorithmClass(input, **inargs)
 			print("running algorithm")
-			timer = stopwatch.Timer()
+			timer = timeit.default_timer()
 			result = algorithm.run()
-			timer.stop()
+			timerElapsed = timeit.default_timer() - timer
 			# append run data
-			data.append({"input": inputTitles[i], "threads": nThreads, "time": timer.elapsed})
+			data.append({"input": inputTitles[i], "threads": nThreads, "time": timerElapsed})
 	setNumberOfThreads(threadsAvailable)
 	if outPath:
 		with open(outPath, "w") as outFile:

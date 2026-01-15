@@ -44,8 +44,8 @@ uint64_t get_variant(std::ifstream &is) {
 }
 } // namespace
 
-Graph ThrillGraphBinaryReader::read(const std::string &path) {
-    return read(std::vector<std::string>(1, path));
+Graph ThrillGraphBinaryReader::read(std::string_view path) {
+    return read(std::vector<std::string>(1, path.data()));
 }
 
 Graph ThrillGraphBinaryReader::read(const std::vector<std::string> &paths) {
@@ -92,7 +92,7 @@ Graph ThrillGraphBinaryReader::read(const std::vector<std::string> &paths) {
         }
     }
 
-    return gb.completeGraph(true);
+    return gb.completeGraph();
 }
 
 } // namespace NetworKit

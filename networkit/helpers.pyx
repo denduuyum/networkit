@@ -59,30 +59,6 @@ def ranked(sample):
 		result[helper[len(sample)-j-1].second] = summ
 	return result
 
-def sorted(sample):
-	"""	
-	sorted(sample)	
-
-	Returns a sorted list of given numbers.
-
-	Note
-	----
-	DEPRECATED. Use :code:`sorted()` function provided by Python.
-
-	Parameters
-	----------
-	sample : list(float)
-		(Unsorted) input list of values.
-
-	Returns
-	-------
-	list(float)
-		Sorted list of values.
-	"""
-	cdef vector[double] result = <vector[double]?>sample
-	sort(result.begin(),result.end())
-	return result
-
 # Cython helper functions
 def stdstring(pystring):
 	""" 
@@ -181,7 +157,7 @@ cdef asarray_2d(vector[vector[element_t]]* nested):
 	cdef:
 		element_t[:] values
 		element_t* target
-		int num_rows, num_cols
+		size_t num_rows, num_cols
 
 	# Return an empty matrix if there are no rows.
 	num_rows = nested.size()

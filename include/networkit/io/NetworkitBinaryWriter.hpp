@@ -39,7 +39,12 @@ enum class NetworkitBinaryEdgeIDs : int {
 /**
  * @ingroup io
  *
- * Writes a graph in the custom Networkit format documented in cpp/io/NetworkitGraph.md
+ * Writes a graph written in the custom Networkit format.
+ * Note that there are multiple versions of the Networkit binary format.
+ * Since Networkit 9.1 (December 2021), the writer always writes files using format version 3.
+ * Reading a binary file with version < 3 and re-writing it, implicitly upgrades the format to the
+ * current version. Further information can be found here:
+ * https://github.com/networkit/networkit/blob/master/networkit/cpp/io/NetworkitBinaryGraph.md
  */
 class NetworkitBinaryWriter final : public GraphWriter {
 
@@ -48,15 +53,15 @@ public:
                           NetworkitBinaryWeights weightsType = NetworkitBinaryWeights::AUTO_DETECT,
                           NetworkitBinaryEdgeIDs edgeIndex = NetworkitBinaryEdgeIDs::AUTO_DETECT);
 
-    void write(const Graph &G, const std::string &path) override;
+    void write(const Graph &G, std::string_view path) override;
     std::vector<uint8_t> writeToBuffer(const Graph &G);
 
 private:
+    static constexpr const char *FILE_FORMAT = "nkbg003";
     count chunks;
     NetworkitBinaryWeights weightsType;
     NetworkitBinaryEdgeIDs edgeIndex;
     bool preserveEdgeIndex;
-
     template <class T>
     void writeData(T &outStream, const Graph &G);
 };

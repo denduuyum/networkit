@@ -10,6 +10,7 @@
 #include <cmath>
 #include <map>
 #include <random>
+#include <ranges>
 #include <sstream>
 
 #include <networkit/auxiliary/Log.hpp>
@@ -23,9 +24,10 @@ namespace NetworKit {
 Graph::Graph(count n, bool weighted, bool directed, bool edgesIndexed)
     : n(n), m(0), storedNumberOfSelfLoops(0), z(n), omega(0), t(0),
 
-      weighted(weighted),         // indicates whether the graph is weighted or not
-      directed(directed),         // indicates whether the graph is directed or not
-      edgesIndexed(edgesIndexed), // edges are not indexed by default
+      weighted(weighted), // indicates whether the graph is weighted or not
+      directed(directed), // indicates whether the graph is directed or not
+      edgesIndexed(edgesIndexed), deletedID(none),
+      // edges are not indexed by default
 
       exists(n, true),
 
@@ -38,7 +40,7 @@ Graph::Graph(count n, bool weighted, bool directed, bool edgesIndexed)
       undirected edges*/
       outEdges(n), inEdgeWeights(weighted && directed ? n : 0), outEdgeWeights(weighted ? n : 0),
       inEdgeIds(edgesIndexed && directed ? n : 0), outEdgeIds(edgesIndexed ? n : 0),
-      nodeAttributeMap(this) {}
+      nodeAttributeMap(this), edgeAttributeMap(this) {}
 
 Graph::Graph(std::initializer_list<WeightedEdge> edges) : Graph(0, true) {
     using namespace std;
@@ -132,6 +134,7 @@ void Graph::indexEdges(bool force) {
 
     omega = 0; // reset edge ids (for re-indexing)
 
+    outEdgeIds.clear(); // reset ids vector (for re-indexing)
     outEdgeIds.resize(outEdges.size());
     forNodes([&](node u) { outEdgeIds[u].resize(outEdges[u].size(), none); });
 
@@ -223,34 +226,31 @@ void Graph::shrinkToFit() {
 
 void Graph::compactEdges() {
     this->parallelForNodes([&](node u) {
-        if (degreeOut(u) != outEdges[u].size()) {
-            if (degreeOut(u) == 0) {
-                outEdges[u].clear();
-                if (weighted)
-                    outEdgeWeights[u].clear();
-                if (edgesIndexed)
-                    outEdgeIds[u].clear();
-            } else {
-                for (index i = 0; i < outEdges[u].size(); ++i) {
-                    while (i < outEdges[u].size() && outEdges[u][i] == none) {
-                        outEdges[u][i] = outEdges[u].back();
-                        outEdges[u].pop_back();
+        if (degreeOut(u) == 0) {
+            outEdges[u].clear();
+            if (weighted)
+                outEdgeWeights[u].clear();
+            if (edgesIndexed)
+                outEdgeIds[u].clear();
+        } else {
+            for (index i = 0; i < outEdges[u].size(); ++i) {
+                while (i < outEdges[u].size() && outEdges[u][i] == none) {
+                    outEdges[u][i] = outEdges[u].back();
+                    outEdges[u].pop_back();
 
-                        if (weighted) {
-                            outEdgeWeights[u][i] = outEdgeWeights[u].back();
-                            outEdgeWeights[u].pop_back();
-                        }
+                    if (weighted) {
+                        outEdgeWeights[u][i] = outEdgeWeights[u].back();
+                        outEdgeWeights[u].pop_back();
+                    }
 
-                        if (edgesIndexed) {
-                            outEdgeIds[u][i] = outEdgeIds[u].back();
-                            outEdgeIds[u].pop_back();
-                        }
+                    if (edgesIndexed) {
+                        outEdgeIds[u][i] = outEdgeIds[u].back();
+                        outEdgeIds[u].pop_back();
                     }
                 }
             }
         }
-
-        if (directed && degreeIn(u) != inEdges[u].size()) {
+        if (directed) {
             if (degreeIn(u) == 0) {
                 inEdges[u].clear();
                 if (weighted)
@@ -531,8 +531,7 @@ bool Graph::addPartialEdge(Unsafe, node u, node v, edgeweight ew, uint64_t index
     assert(v < z);
     assert(exists[v]);
 
-    if (checkForMultiEdges
-        && (std::find(outEdges[u].begin(), outEdges[u].end(), v) != outEdges[u].end())) {
+    if (checkForMultiEdges && (std::ranges::find(outEdges[u], v) != outEdges[u].end())) {
         return false;
     }
 
@@ -555,8 +554,7 @@ bool Graph::addPartialOutEdge(Unsafe, node u, node v, edgeweight ew, uint64_t in
     assert(v < z);
     assert(exists[v]);
 
-    if (checkForMultiEdges
-        && (std::find(outEdges[u].begin(), outEdges[u].end(), v) != outEdges[u].end())) {
+    if (checkForMultiEdges && (std::ranges::find(outEdges[u], v) != outEdges[u].end())) {
         return false;
     }
 
@@ -579,8 +577,7 @@ bool Graph::addPartialInEdge(Unsafe, node u, node v, edgeweight ew, uint64_t ind
     assert(v < z);
     assert(exists[v]);
 
-    if (checkForMultiEdges
-        && (std::find(inEdges[u].begin(), inEdges[u].end(), v) != inEdges[u].end())) {
+    if (checkForMultiEdges && (std::ranges::find(inEdges[u], v) != inEdges[u].end())) {
         return false;
     }
 
@@ -608,8 +605,16 @@ void Graph::removeEdge(node u, node v) {
     assert(v < z);
     assert(exists[v]);
 
-    index vi = indexInOutEdgeArray(u, v);
-    index ui = indexInInEdgeArray(v, u);
+    if (maintainCompactEdges && !edgesIndexed) {
+        throw std::runtime_error("Edges have to be indexed if maintainCompactEdges is set to true");
+    }
+
+    index vi = indexInOutEdgeArray(u, v); // index in outEdges array
+    index ui = indexInInEdgeArray(v, u);  // index in inEdges array
+
+    if (edgesIndexed) {
+        deletedID = edgeId(u, v);
+    }
 
     if (vi == none) {
         std::stringstream strm;
@@ -622,14 +627,79 @@ void Graph::removeEdge(node u, node v) {
     if (isLoop)
         storedNumberOfSelfLoops--;
 
+    // remove edge for source node
     erase<node>(u, vi, outEdges);
     if (weighted) {
         erase<edgeweight>(u, vi, outEdgeWeights);
     }
     if (edgesIndexed) {
         erase<edgeid>(u, vi, outEdgeIds);
+        // Make the attributes of this edge invalid
+        auto &theMap = edgeAttributeMap.attrMap;
+        for (auto it = theMap.begin(); it != theMap.end(); ++it) {
+            auto attributeStorageBase = it->second.get();
+            attributeStorageBase->invalidate(deletedID);
+        }
     }
+    if (!directed && !isLoop) {
+        // also remove edge for target node
+        erase<node>(v, ui, outEdges);
+        if (weighted) {
+            erase<edgeweight>(v, ui, outEdgeWeights);
+        }
+        if (edgesIndexed) {
+            erase<edgeid>(v, ui, outEdgeIds);
+        }
+    }
+    if (maintainSortedEdges) {
+        // initial index of deleted edge, also represents current index
+        index cur = vi;
 
+        // sort edges of source node from deleted index upwards
+        while (cur + 1 < outEdges[u].size() && outEdges[u][cur] > outEdges[u][cur + 1]) {
+            std::swap(outEdges[u][cur], outEdges[u][cur + 1]);
+            if (edgesIndexed) {
+                std::swap(outEdgeIds[u][cur], outEdgeIds[u][cur + 1]);
+                // swap attributes as well
+                auto &theMap = edgeAttributeMap.attrMap;
+                for (auto it = theMap.begin(); it != theMap.end(); ++it) {
+                    auto attributeStorageBase = it->second.get();
+                    attributeStorageBase->swapData(outEdgeIds[u][cur], outEdgeIds[u][cur + 1]);
+                }
+            }
+            ++cur;
+        }
+
+        if (!directed) {
+            cur = ui;
+
+            // sort edges of target node from deleted index upwards
+            while (cur + 1 < outEdges[v].size() && outEdges[v][cur] > outEdges[v][cur + 1]) {
+                std::swap(outEdges[v][cur], outEdges[v][cur + 1]);
+                if (edgesIndexed) {
+                    std::swap(outEdgeIds[v][cur], outEdgeIds[v][cur + 1]);
+                }
+                ++cur;
+            }
+        }
+    }
+    if (maintainCompactEdges) {
+        // re-index edge IDs from deleted edge upwards
+        balancedParallelForNodes([&](node w) {
+            for (index i = 0; i < outEdges[w].size(); ++i) {
+                auto curID = outEdgeIds[w][i];
+                if (curID > deletedID) {
+                    outEdgeIds[w][i]--;
+                }
+            }
+        });
+        // use erase to remove data entry at index `deletedID` and compact the data vector again
+        auto &theMap = edgeAttributeMap.attrMap;
+        for (auto it = theMap.begin(); it != theMap.end(); ++it) {
+            auto attributeStorageBase = it->second.get();
+            attributeStorageBase->erase(deletedID);
+        }
+    }
     if (directed) {
         assert(ui != none);
 
@@ -640,15 +710,35 @@ void Graph::removeEdge(node u, node v) {
         if (edgesIndexed) {
             erase<edgeid>(v, ui, inEdgeIds);
         }
-    } else if (!isLoop) {
-        // undirected, not self-loop
-        erase<node>(v, ui, outEdges);
-        if (weighted) {
-            erase<edgeweight>(v, ui, outEdgeWeights);
+        if (maintainSortedEdges) {
+            // initial index of deleted edge, also represents current index
+            index cur = ui;
+
+            // sort edges of target node from deleted index upwards
+            while (cur + 1 < inEdges[v].size() && inEdges[v][cur] > inEdges[v][cur + 1]) {
+                std::swap(inEdges[v][cur], inEdges[v][cur + 1]);
+                if (edgesIndexed) {
+                    std::swap(inEdgeIds[v][cur], inEdgeIds[v][cur + 1]);
+                }
+                ++cur;
+            }
         }
-        if (edgesIndexed) {
-            erase<edgeid>(v, ui, outEdgeIds);
+
+        if (maintainCompactEdges) {
+            // re-index edge ids from target node
+            balancedParallelForNodes([&](node w) {
+                for (index i = 0; i < inEdges[w].size(); ++i) {
+                    node vv = inEdges[w][i];
+                    if (vv != none) {
+                        index j = indexInOutEdgeArray(vv, w);
+                        inEdgeIds[w][i] = outEdgeIds[vv][j];
+                    }
+                }
+            });
         }
+    }
+    if (maintainCompactEdges) {
+        omega--; // decrease upperBound of edges
     }
 }
 
@@ -812,13 +902,16 @@ void Graph::setWeightAtIthNeighbor(Unsafe, node u, index i, edgeweight ew) {
     outEdgeWeights[u][i] = ew;
 }
 
+void Graph::setWeightAtIthInNeighbor(Unsafe, node u, index i, edgeweight ew) {
+    inEdgeWeights[u][i] = ew;
+}
+
 /** SUMS **/
 
 edgeweight Graph::totalEdgeWeight() const noexcept {
     if (weighted)
         return parallelSumForEdges([](node, node, edgeweight ew) { return ew; });
-    else
-        return numberOfEdges() * defaultEdgeWeight;
+    return numberOfEdges() * defaultEdgeWeight;
 }
 
 bool Graph::checkConsistency() const {
@@ -896,11 +989,5 @@ bool Graph::checkConsistency() const {
 
     return noMultiEdges && correctNodeUpperbound && correctNumberOfEdges;
 }
-
-/** NODE ATTRIBUTE INSTANTIATION FOR STRINGS **/
-/** (needed for Python Binding)                    **/
-
-template class Graph::NodeAttribute<std::string>;
-template class Graph::NodeAttributeStorage<std::string>;
 
 } /* namespace NetworKit */
