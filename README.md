@@ -58,7 +58,7 @@
 </details>
 
 <!-- ABOUT THE PROJECT -->
-# What is this fork?
+## What is this fork?
 
 This fork of NetworKit library contains distance limited betweenness algorithms.
 
