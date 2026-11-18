@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import unittest
-import random
 import networkit as nk
 import pickle
 import numpy as np
@@ -36,19 +35,61 @@ class TestGraph(unittest.TestCase):
                 self.assertEqual(G.numberOfNodes(), 3)
                 self.assertEqual(G.numberOfEdges(), 3)
 
+    def testConstructorWithCooDtypes(self):
+        dtypes = [np.int8, np.int16, np.int32, np.int64]
+
+        for dtype in dtypes:
+            row = np.array([0, 1, 2], dtype=dtype)
+            col = np.array([1, 2, 0], dtype=dtype)
+            data = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+
+            for weighted in [True, False]:
+                for directed in [True, False]:
+                    G = nk.GraphFromCoo(
+                        (data, (row, col)), n=3, directed=directed, weighted=weighted
+                    )
+                    self.assertEqual(G.isDirected(), directed)
+                    self.assertEqual(G.isWeighted(), weighted)
+                    self.assertEqual(G.numberOfNodes(), 3)
+                    self.assertEqual(G.numberOfEdges(), 3)
+
     def testConstructorWithMatrix(self):
         row = np.array([0, 1, 2])
         col = np.array([1, 2, 0])
         data = np.array([1.0, 2.0, 3.0])
-        S = sc.sparse.coo_matrix((data, (row, col)), dtype=np.double)
+        for mat_typ in ["coo_matrix", "csr_matrix"]:
+            is_coo = "coo" in mat_typ
+            S = getattr(sc.sparse, mat_typ)((data, (row, col)), dtype=np.double)
 
-        for weighted in [True, False]:
+            for weighted in [True, False]:
+                for directed in [True, False]:
+                    G = getattr(nk, "GraphFromCoo" if is_coo else "GraphFromCsr")(S, directed=directed, weighted=weighted, **({"n":3} if is_coo else {}))
+                    self.assertEqual(G.isDirected(), directed)
+                    self.assertEqual(G.isWeighted(), weighted)
+                    self.assertEqual(G.numberOfNodes(), 3)
+                    self.assertEqual(G.numberOfEdges(), 3)
+
+                    # Unweighted graphs use the default weight 1.0, so their total equals the edge count.
+                    if weighted:
+                        self.assertAlmostEqual(G.totalEdgeWeight(), float(data.sum()))
+                    else:
+                        self.assertAlmostEqual(G.totalEdgeWeight(), G.numberOfEdges())
+
+    def testConstructorWithCooMatrixFractionalWeights(self):
+        expectedWeights = {(0, 1): 0.25, (1, 2): 0.5, (2, 0): 0.75}
+        for dtype in [np.float32, np.float64]:
+            S = sc.sparse.coo_matrix(
+                ([0.25, 0.5, 0.75], ([0, 1, 2], [1, 2, 0])), dtype=dtype
+            )
             for directed in [True, False]:
-                G = nk.GraphFromCoo(S, n=3, directed=directed, weighted=weighted)
-                self.assertEqual(G.isDirected(), directed)
-                self.assertEqual(G.isWeighted(), weighted)
-                self.assertEqual(G.numberOfNodes(), 3)
-                self.assertEqual(G.numberOfEdges(), 3)
+                for n in [0, 3]:
+                    with self.subTest(dtype=dtype, directed=directed, n=n):
+                        G = nk.GraphFromCoo(S, n=n, weighted=True, directed=directed)
+                        self.assertEqual(G.numberOfNodes(), 3)
+                        self.assertEqual(G.numberOfEdges(), 3)
+                        for (u, v), weight in expectedWeights.items():
+                            self.assertEqual(G.weight(u, v), weight)
+                        self.assertEqual(G.totalEdgeWeight(), 1.5)
 
     def testAddNodes(self):
         G = nk.Graph(0)
@@ -151,6 +192,35 @@ class TestGraph(unittest.TestCase):
 
         for i in range(len(S.row)):
             self.assertTrue(G.hasEdge(S.row[i], S.col[i]))
+
+    def testAddEdgesCooMatrixFractionalWeights(self):
+        expectedWeights = {(0, 1): 0.25, (1, 2): 0.5, (2, 0): 0.75}
+        for dtype in [np.float32, np.float64]:
+            S = sc.sparse.coo_matrix(
+                ([0.25, 0.5, 0.75], ([0, 1, 2], [1, 2, 0])), dtype=dtype
+            )
+            for directed in [True, False]:
+                for addMissing in [True, False]:
+                    with self.subTest(dtype=dtype, directed=directed, addMissing=addMissing):
+                        G = nk.Graph(0 if addMissing else 3, weighted=True, directed=directed)
+                        G.addEdges(S, addMissing=addMissing)
+                        self.assertEqual(G.numberOfNodes(), 3)
+                        self.assertEqual(G.numberOfEdges(), 3)
+                        for (u, v), weight in expectedWeights.items():
+                            self.assertEqual(G.weight(u, v), weight)
+                        self.assertEqual(G.totalEdgeWeight(), 1.5)
+
+    def testAddEdgesWithNonFloatWeights(self):
+        # Use a weighted graph so weights are actually stored/checked
+        g = nk.Graph(0, weighted=True)
+
+        # Deterministic endpoints + int32 weights
+        a = np.array([0, 1, 2], dtype=np.int64)
+        b = np.array([1, 2, 3], dtype=np.int64)
+        c = np.array([5, 6, 7], dtype=np.int32)
+
+        with self.assertRaisesRegex(TypeError, "invalid input format"):
+            g.addEdges((c, (a, b)), addMissing=False)
 
     def testGraphPickling(self):
         G = nk.Graph(2)
@@ -295,6 +365,17 @@ class TestGraph(unittest.TestCase):
                 self.assertEqual(attrs[u], attVals[u])
 
             G.detachNodeAttribute("attribute")
+
+    def testNodeAttributesImplicitFloatConversion(self):
+        G = nk.Graph(1)
+
+        integers = [0, -1, -3, 42]
+        attr = G.attachNodeAttribute("test", float)
+        for value in integers:
+            attr[0] = value
+
+            self.assertEqual(attr[0], float(value))
+            self.assertTrue(isinstance(attr[0], float))
 
     def testNodeAttributeReadWrite(self):
         G = nk.Graph(5)
@@ -621,6 +702,27 @@ class TestGraph(unittest.TestCase):
         pmf.run()
         self.assertEqual(G.numberOfNodes(), pmf.getForest().numberOfNodes())
 
+    def testMinimumSpanningForestPreservesWeights(self):
+        G = nk.Graph(6, weighted=True)
+        G.addEdge(0, 1, 2.5)
+        G.addEdge(1, 2, -1.25)
+        G.addEdge(0, 2, 4.0)
+        G.addEdge(3, 4, 0.0)
+
+        for algorithm in (nk.graph.PrimMSF, nk.graph.KruskalMSF):
+            with self.subTest(algorithm=algorithm.__name__):
+                msf = algorithm(G).run()
+                forest = msf.getForest()
+                self.assertTrue(forest.isWeighted())
+                self.assertEqual(forest.numberOfNodes(), 6)
+                self.assertEqual(forest.numberOfEdges(), 3)
+                self.assertEqual(forest.weight(0, 1), 2.5)
+                self.assertEqual(forest.weight(1, 2), -1.25)
+                self.assertTrue(forest.hasEdge(3, 4))
+                self.assertEqual(forest.weight(3, 4), 0.0)
+                self.assertEqual(forest.totalEdgeWeight(), 1.25)
+                self.assertEqual(msf.getTotalWeight(), 1.25)
+
     def testSpanningForest(self):
         G = self.getSmallGraph()
         sf = nk.graph.SpanningForest(G)
@@ -640,6 +742,65 @@ class TestGraph(unittest.TestCase):
         self.assertEqual(un.getUMSF().numberOfNodes(), 4)
         self.assertEqual(un.getUMSF().numberOfEdges(), 5)
         self.assertTrue(un.inUMST(0, 1))
+
+    def testForInEdgesOfInvalidNodeRaises(self):
+        G = nk.Graph(2, directed=True)
+        G.addEdge(0, 1)
+
+        def edgeFunc(*args):
+            self.fail("Callback should not be called for a non-existing node")
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot iterate over in-edges of non-existing node 912",
+        ):
+            G.forInEdgesOf(912, edgeFunc)
+
+
+    def testForInEdgesOfRemovedNodeRaises(self):
+        G = nk.Graph(3, directed=True)
+        G.addEdge(0, 1)
+        G.addEdge(2, 1)
+
+        G.removeNode(1)
+
+        def edgeFunc(*args):
+            self.fail("Callback should not be called for a removed node")
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot iterate over in-edges of non-existing node 1",
+        ):
+            G.forInEdgesOf(1, edgeFunc)
+
+    def testForEdgesOfInvalidNodeRaises(self):
+        G = nk.Graph(2)
+        G.addEdge(0, 1)
+
+        def edgeFunc(*args):
+            self.fail("Callback should not be called for a non-existing node")
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot iterate over edges of non-existing node 912",
+        ):
+            G.forEdgesOf(912, edgeFunc)
+
+
+    def testForEdgesOfRemovedNodeRaises(self):
+        G = nk.Graph(3)
+        G.addEdge(0, 2)
+
+        G.removeNode(1)
+
+        def edgeFunc(*args):
+            self.fail("Callback should not be called for a removed node")
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot iterate over edges of non-existing node 1",
+        ):
+            G.forEdgesOf(1, edgeFunc)
 
 
 if __name__ == "__main__":

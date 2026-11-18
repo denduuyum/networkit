@@ -11,22 +11,23 @@
 #include <iterator>
 
 #include <networkit/Globals.hpp>
+#include <networkit/graph/GraphConcepts.hpp>
 
 namespace NetworKit {
 
 /**
  * Class to iterate over the nodes of a graph.
  */
-template <typename GraphType>
+template <class GraphType, GraphNode NodeT, GraphEdgeWeight EdgeWeightT>
 class NodeIteratorBase {
 
     const GraphType *G;
-    node u{none};
+    NodeT u{NullNodeId<NodeT>};
 
 public:
     // The value type of the nodes (i.e. nodes). Returned by
     // operator*().
-    using value_type = node;
+    using value_type = NodeT;
 
     // Reference to the value_type, required by STL.
     using reference = value_type &;
@@ -44,7 +45,7 @@ public:
     // Own type.
     using self = NodeIteratorBase;
 
-    NodeIteratorBase(const GraphType *G, node u) : G(G), u(u) {
+    NodeIteratorBase(const GraphType *G, NodeT u) : G(G), u(u) {
         if (!G->hasNode(u) && u < G->upperNodeIdBound()) {
             ++(*this);
         }
@@ -90,7 +91,7 @@ public:
 
     bool operator!=(const NodeIteratorBase &rhs) const noexcept { return !(*this == rhs); }
 
-    node operator*() const noexcept {
+    NodeT operator*() const noexcept {
         assert(u < G->upperNodeIdBound());
         return u;
     }
@@ -99,7 +100,7 @@ public:
 /**
  * Wrapper class to iterate over a range of the nodes of a graph.
  */
-template <typename GraphType>
+template <class GraphType, GraphNode NodeT, GraphEdgeWeight EdgeWeightT>
 class NodeRangeBase {
 
     const GraphType *G;
@@ -107,18 +108,18 @@ class NodeRangeBase {
 public:
     NodeRangeBase(const GraphType &G) : G(&G) {}
 
-    NodeRangeBase() : G(nullptr){};
+    NodeRangeBase() : G(nullptr) {};
 
     ~NodeRangeBase() = default;
 
-    NodeIteratorBase<GraphType> begin() const noexcept {
-        assert(G);
-        return NodeIteratorBase(G, node{0});
+    NodeIteratorBase<GraphType, NodeT, EdgeWeightT> begin() const noexcept {
+        assert(G != nullptr);
+        return NodeIteratorBase<GraphType, NodeT, EdgeWeightT>(G, NodeT{0});
     }
 
-    NodeIteratorBase<GraphType> end() const noexcept {
+    NodeIteratorBase<GraphType, NodeT, EdgeWeightT> end() const noexcept {
         assert(G);
-        return NodeIteratorBase(G, G->upperNodeIdBound());
+        return NodeIteratorBase<GraphType, NodeT, EdgeWeightT>(G, G->upperNodeIdBound());
     }
 };
 

@@ -59,7 +59,7 @@ __credits__ = [
     "Jörg Weisbarth",
 ]
 __license__ = "MIT"
-__version__ = "11.2.1"
+__version__ = "11.3"
 
 # standard library modules
 import csv
@@ -110,9 +110,9 @@ from . import stats
 from . import viz
 from . import randomization
 from . import independentset
+from . import planarity
 from .support import MissingDependencyError
 from .graphtools import GraphTools as graphtools
-
 
 if have_plt:
     from . import plot
@@ -141,7 +141,7 @@ from .engineering import (
 )
 
 # local imports into the top namespace
-from .graph import Graph, GraphFromCoo
+from .graph import Graph, GraphFromCoo, GraphFromCsr
 from .structures import Partition, Cover
 from .graphio import readGraph, writeGraph, readGraphs, Format
 

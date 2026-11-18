@@ -5,19 +5,24 @@
  *      Author: elisabetta bergamini
  */
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <omp.h>
 #include <queue>
 #include <ranges>
+#include <stdexcept>
 
-#include <networkit/auxiliary/BucketPQ.hpp>
+#include <networkit/auxiliary/BucketPriorityQueue.hpp>
 #include <networkit/auxiliary/Log.hpp>
 #include <networkit/centrality/GroupCloseness.hpp>
 #include <networkit/centrality/TopCloseness.hpp>
 namespace NetworKit {
 
 GroupCloseness::GroupCloseness(const Graph &G, count k, count H) : G(&G), k(k), H(H) {
+    if (k == 0 || k > G.numberOfNodes())
+        throw std::invalid_argument("Group size must be between 1 and the number of nodes.");
+
     d1Global.resize(omp_get_max_threads(), std::vector<count>(G.upperNodeIdBound()));
 }
 
@@ -67,6 +72,9 @@ void GroupCloseness::updateDistances(node u) {
 }
 
 void GroupCloseness::run() {
+    if (k > G->numberOfNodes())
+        throw std::invalid_argument("Group size must be between 1 and the number of nodes.");
+
     const count n = G->upperNodeIdBound();
     node top;
 
@@ -74,7 +82,8 @@ void GroupCloseness::run() {
     omp_init_lock(&lock);
 
     if (H == 0) {
-        TopCloseness topcc(*G, 1, true, false);
+        // The first heuristic requires contiguous node IDs.
+        TopCloseness topcc(*G, 1, n == G->numberOfNodes(), false);
         topcc.run();
         top = topcc.topkNodesList()[0];
     } else
@@ -148,11 +157,22 @@ void GroupCloseness::run() {
                 }
             }
         }
+        if (maxNode == none) {
+            // Disconnected or isolated nodes can have zero marginal gain. Still
+            // return k distinct nodes rather than using none as a distance index.
+            for (const node v : G->nodeRange()) {
+                if (std::ranges::find(S.begin(), S.begin() + i, v) == S.begin() + i) {
+                    maxNode = v;
+                    break;
+                }
+            }
+        }
         S[i] = maxNode;
 
         updateDistances(S[i]);
     }
 
+    omp_destroy_lock(&lock);
     hasRun = true;
 }
 

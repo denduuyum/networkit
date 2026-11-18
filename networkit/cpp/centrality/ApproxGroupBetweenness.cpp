@@ -8,11 +8,10 @@
 #include <cmath>
 #include <omp.h>
 
-#include <networkit/auxiliary/BucketPQ.hpp>
+#include <networkit/auxiliary/BucketPriorityQueue.hpp>
 #include <networkit/auxiliary/Random.hpp>
 #include <networkit/centrality/ApproxGroupBetweenness.hpp>
 #include <networkit/distance/BFS.hpp>
-#include <networkit/distance/SSSP.hpp>
 #include <networkit/graph/GraphTools.hpp>
 
 namespace NetworKit {
@@ -69,7 +68,7 @@ void ApproxGroupBetweenness::run() {
         assert(dist);
         hyperEdgesPerSample[l].reserve(dist - 1);
         for (count i = 0; i < dist - 1; ++i) {
-            auto predecessors = bfs.getPredecessors(t);
+            const auto &predecessors = bfs.getPredecessors(t);
             t = predecessors[Aux::Random::integer(predecessors.size() - 1)];
             hyperEdgesPerSample[l].push_back(t);
         }

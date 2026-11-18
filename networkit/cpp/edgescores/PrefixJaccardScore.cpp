@@ -30,7 +30,7 @@ void PrefixJaccardScore<AttributeT>::run() {
         AttributeT att;
         count rank;
 
-        RankedEdge(node u, AttributeT att, count rank) : u(u), att(att), rank(rank){};
+        RankedEdge(node u, AttributeT att, count rank) : u(u), att(att), rank(rank) {};
 
         bool operator<(const RankedEdge &other) const {
             return std::tie(rank, att, u) < std::tie(other.rank, other.att, other.u);
@@ -149,16 +149,6 @@ void PrefixJaccardScore<AttributeT>::run() {
     });
 
     this->hasRun = true;
-}
-
-template <typename AttributeT>
-double PrefixJaccardScore<AttributeT>::score(node, node) {
-    throw std::runtime_error("Not implemented: Use scores() instead.");
-}
-
-template <typename AttributeT>
-double PrefixJaccardScore<AttributeT>::score(edgeid) {
-    throw std::runtime_error("Not implemented: Use scores() instead.");
 }
 
 template class PrefixJaccardScore<double>;

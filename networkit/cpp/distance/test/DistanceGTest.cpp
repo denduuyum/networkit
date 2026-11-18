@@ -57,6 +57,14 @@ protected:
 
         return G;
     }
+
+    Graph generatePathGraphWithoutNodeZero() const {
+        Graph G(4, isWeighted(), isDirected());
+        G.addEdge(1, 2);
+        G.addEdge(2, 3);
+        G.removeNode(0);
+        return G;
+    }
 };
 
 constexpr edgeweight DistanceGTest::infdist;
@@ -96,24 +104,24 @@ TEST_F(DistanceGTest, testAStarInvalidSourceNode) {
     Graph G(5);
     std::vector<double> distanceHeu = {1.0, 2.0, 3.0, 4.0, 5.0};
 
-    EXPECT_THROW({ AStar astar(G, distanceHeu, /*invalid_source*/ 6, /*target*/ 0); },
-                 std::runtime_error);
+    EXPECT_THROW(
+        { AStar astar(G, distanceHeu, /*invalid_source*/ 6, /*target*/ 0); }, std::runtime_error);
 }
 
 TEST_F(DistanceGTest, testAStarInvalidTargetNode) {
     Graph G(5);
     std::vector<double> distanceHeu = {1.0, 2.0, 3.0, 4.0, 5.0};
 
-    EXPECT_THROW({ AStar astar(G, distanceHeu, /*source*/ 0, /*invalid_target*/ 6); },
-                 std::runtime_error);
+    EXPECT_THROW(
+        { AStar astar(G, distanceHeu, /*source*/ 0, /*invalid_target*/ 6); }, std::runtime_error);
 }
 
 TEST_F(DistanceGTest, testAStarConstructorThrowsMismatchHeuristicAndNodeCount) {
     Graph G(5);
     std::vector<double> distanceHeu = {1.0, 2.0}; // size mismatch (2 instead of 5)
 
-    EXPECT_THROW({ AStar astar_bad(G, distanceHeu, /*source*/ 0, /*target*/ 1); },
-                 std::runtime_error);
+    EXPECT_THROW(
+        { AStar astar_bad(G, distanceHeu, /*source*/ 0, /*target*/ 1); }, std::runtime_error);
 }
 
 TEST_F(DistanceGTest, testAStar) {
@@ -186,25 +194,35 @@ TEST_F(DistanceGTest, testAStar) {
 }
 
 TEST_F(DistanceGTest, testAlgebraicDistanceContructorThrowsForInvalidOmegaValues) {
-    Graph G(5, true, true);
+    Graph G(5, true, false);
 
-    EXPECT_THROW({ AlgebraicDistance AGD(G, 10UL, 30UL, /* invalid_omega*/ 1.1, 0UL, true); },
-                 std::invalid_argument);
-    EXPECT_THROW({ AlgebraicDistance AGD(G, 10UL, 30UL, /* invalid_omega*/ -0.3, 0UL, true); },
-                 std::invalid_argument);
+    EXPECT_THROW(
+        { AlgebraicDistance AGD(G, 10UL, 30UL, /* invalid_omega*/ 1.1, 0UL, true); },
+        std::invalid_argument);
+    EXPECT_THROW(
+        { AlgebraicDistance AGD(G, 10UL, 30UL, /* invalid_omega*/ -0.3, 0UL, true); },
+        std::invalid_argument);
 }
 
 TEST_F(DistanceGTest, testAlgebraicDistanceContructorThrowsForEdgecoresWithoutEdgeIds) {
-    Graph G(5, true, true, false);
+    Graph G(5, true, false, false);
 
     EXPECT_THROW({ AlgebraicDistance AGD(G, 10UL, 30UL, 0.5, 0UL, true); }, std::runtime_error);
 }
 
 TEST_F(DistanceGTest, testAlgebraicDistanceDistanceThrowsIfPreprocessNotCalled) {
-    Graph G(5, true, true, true);
+    Graph G(5, true, false, true);
     AlgebraicDistance AGD(G, 10UL, 30UL, 0.5, 0UL, true);
 
     EXPECT_THROW(AGD.distance(/*source*/ 0, /*target*/ 2), std::runtime_error);
+}
+
+TEST_F(DistanceGTest, testAlgebraicDistanceThrowsIfGraphIsDirected) {
+    Aux::Random::setSeed(42, false);
+    Graph G(5, false, true);
+    G.indexEdges();
+
+    EXPECT_THROW(AlgebraicDistance AGD(G, 10UL, 30UL, 0.5, 0UL, true), std::invalid_argument);
 }
 
 TEST_P(DistanceGTest, testAdamicAdar) {
@@ -249,19 +267,37 @@ TEST_P(DistanceGTest, testAdamicAdar) {
     }
 }
 
-TEST_P(DistanceGTest, testAlgebraicDistance) {
+TEST_F(DistanceGTest, testAlgebraicDistance) {
     Aux::Random::setSeed(42, false);
-    auto G = generateERGraph(500, 0.03);
-    G.indexEdges();
+    auto G_unweighted_undirected = METISGraphReader().read("input/celegans_metabolic.graph");
+    auto G_weighted_undirected = METISGraphReader().read("input/lesmis.graph");
 
-    AlgebraicDistance AGD(G, 10UL, 30UL, 0.5, 0UL, true);
-    AGD.preprocess();
-    // arbitrary nodes
-    node source = 0;
-    node target = 42;
-    EXPECT_GT(AGD.distance(source, target), 0.2);
-    auto res = AGD.getEdgeScores();
-    for (auto dist : res) {
+    G_unweighted_undirected.indexEdges();
+    G_weighted_undirected.indexEdges();
+
+    // Algebraic Distance only for undirected graphs
+    AlgebraicDistance AGD_unweighted_undirected(G_unweighted_undirected, 10UL, 30UL, 0.5, 0UL,
+                                                true);
+    AlgebraicDistance AGD_weighted_undirected(G_weighted_undirected, 10UL, 30UL, 0.5, 0UL, true);
+
+    AGD_unweighted_undirected.preprocess();
+    AGD_weighted_undirected.preprocess();
+
+    // 0 42
+    node source = 25;
+    node target = 345;
+    EXPECT_GT(AGD_unweighted_undirected.distance(source, target), 0.037);
+    auto res_unweighted_undirected = AGD_unweighted_undirected.getEdgeScores();
+    for (auto dist : res_unweighted_undirected) {
+        EXPECT_LE(dist, 1);
+    }
+
+    // 0 42
+    source = 0;
+    target = 42;
+    EXPECT_GT(AGD_weighted_undirected.distance(source, target), 0.50);
+    auto res_weighted_undirected = AGD_weighted_undirected.getEdgeScores();
+    for (auto dist : res_weighted_undirected) {
         EXPECT_LE(dist, 1);
     }
 }
@@ -451,6 +487,29 @@ TEST_F(DistanceGTest, testExactDiameter) {
         count diameter = diam.getDiameter().first;
         EXPECT_EQ(diameter, testInstance.second);
     }
+}
+
+TEST_F(DistanceGTest, testDiameterEmptyGraph) {
+    Graph G(0);
+    const auto expectedDiameter = std::make_pair<count, count>(0, 0);
+
+    for (const auto algo :
+         {DiameterAlgo::AUTOMATIC, DiameterAlgo::EXACT, DiameterAlgo::ESTIMATED_PEDANTIC}) {
+        Diameter diam(G, algo);
+        diam.run();
+        EXPECT_TRUE(diam.hasFinished());
+        EXPECT_EQ(diam.getDiameter(), expectedDiameter);
+    }
+
+    Diameter estimatedRange(G, DiameterAlgo::ESTIMATED_RANGE, 0.1);
+    estimatedRange.run();
+    EXPECT_TRUE(estimatedRange.hasFinished());
+    EXPECT_EQ(estimatedRange.getDiameter(), expectedDiameter);
+
+    Diameter estimatedSamples(G, DiameterAlgo::ESTIMATED_SAMPLES, -1., 1);
+    estimatedSamples.run();
+    EXPECT_TRUE(estimatedSamples.hasFinished());
+    EXPECT_EQ(estimatedSamples.getDiameter(), expectedDiameter);
 }
 
 TEST_F(DistanceGTest, testEstimatedDiameterRange) {
@@ -676,6 +735,19 @@ TEST_F(DistanceGTest, testNeighborhoodFunctionHeuristic) {
     EXPECT_EQ(exact.size(), heuristic.size());
 }
 
+TEST_P(DistanceGTest, testAPSPWithRemovedNodeZero) {
+    const auto G = generatePathGraphWithoutNodeZero();
+
+    APSP apsp(G);
+    apsp.run();
+
+    EXPECT_DOUBLE_EQ(apsp.getDistance(1, 1), 0);
+    EXPECT_DOUBLE_EQ(apsp.getDistance(1, 2), 1);
+    EXPECT_DOUBLE_EQ(apsp.getDistance(1, 3), 2);
+    EXPECT_DOUBLE_EQ(apsp.getDistance(2, 3), 1);
+    EXPECT_DOUBLE_EQ(apsp.getDistance(3, 1), isDirected() ? infdist : 2);
+}
+
 TEST_P(DistanceGTest, testSPSP) {
     for (int seed : {1, 2, 3}) {
         Aux::Random::setSeed(seed, true);
@@ -704,6 +776,20 @@ TEST_P(DistanceGTest, testSPSP) {
     }
 }
 
+TEST_P(DistanceGTest, testSPSPWithRemovedNodeZero) {
+    const auto G = generatePathGraphWithoutNodeZero();
+    const std::vector<node> sources = {1, 2};
+
+    SPSP spsp(G, sources.begin(), sources.end());
+    spsp.run();
+
+    EXPECT_DOUBLE_EQ(spsp.getDistance(1, 1), 0);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(1, 2), 1);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(1, 3), 2);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(2, 3), 1);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(2, 1), isDirected() ? infdist : 1);
+}
+
 TEST_P(DistanceGTest, testSPSPWithTargets) {
     Aux::Random::setSeed(42, true);
     const auto G = generateERGraph(100, 0.15);
@@ -730,6 +816,30 @@ TEST_P(DistanceGTest, testSPSPWithTargets) {
     }
 }
 
+TEST_P(DistanceGTest, testSPSPWithTargetsAndRemovedNodeZero) {
+    const auto G = generatePathGraphWithoutNodeZero();
+    const std::vector<node> sources = {1, 2};
+    const std::vector<node> targets = {2, 3};
+
+    SPSP spsp(G, sources.begin(), sources.end(), targets.begin(), targets.end());
+    spsp.run();
+
+    EXPECT_DOUBLE_EQ(spsp.getDistance(1, 2), 1);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(1, 3), 2);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(2, 2), 0);
+    EXPECT_DOUBLE_EQ(spsp.getDistance(2, 3), 1);
+}
+
+TEST_P(DistanceGTest, testSPSPWithEmptySources) {
+    const auto G = generatePathGraphWithoutNodeZero();
+    const std::vector<node> sources;
+
+    SPSP spsp(G, sources.begin(), sources.end());
+    spsp.run();
+
+    EXPECT_THAT(spsp.getDistances(), testing::IsEmpty());
+}
+
 TEST_P(DistanceGTest, testSPSPWithUnreachableTarget) {
     Aux::Random::setSeed(42, true);
     auto G = generateERGraph(100, 0.15);
@@ -750,8 +860,9 @@ TEST_P(DistanceGTest, testSPSPWithUnreachableTarget) {
 TEST_F(DistanceGTest, testMultiTargetBFSThrowsInvalidSourceWithTargetRange) {
     Graph G(5);
     std::vector<node> targets = {0, 1, 2, 3};
-    EXPECT_THROW({ MultiTargetBFS astar(G, /*invalid_source*/ 6, targets.begin(), targets.end()); },
-                 std::runtime_error);
+    EXPECT_THROW(
+        { MultiTargetBFS astar(G, /*invalid_source*/ 6, targets.begin(), targets.end()); },
+        std::runtime_error);
 }
 
 TEST_F(DistanceGTest, testMultiTargetBFSThrowsWithOneInvalidTargetInTargetRange) {

@@ -15,8 +15,11 @@ from .dynbase cimport _DynAlgorithm
 from .dynbase import DynAlgorithm
 from .dynamics cimport _GraphEvent, GraphEvent
 from .graph cimport _Graph, Graph
+from .helpers cimport maybe_asarray_1d
 from .structures cimport _Cover, Cover, _Partition, Partition, count, index, node, edgeweight
 from networkit.algebraic import adjacencyEigenvector, PageRankMatrix, symmetricEigenvectors
+
+ctypedef double score_val
 
 cdef extern from "limits.h":
 	cdef uint64_t ULONG_MAX 
@@ -29,8 +32,9 @@ cdef extern from "<networkit/centrality/Centrality.hpp>":
 
 	cdef cppclass _Centrality "NetworKit::Centrality"(_Algorithm):
 		_Centrality(_Graph, bool_t, bool_t, edgeweight) except +
-		vector[double] scores() except +
-		vector[pair[node, double]] ranking() except +
+		vector[score_val] &scores() except +
+		vector[score_val] compactScores() except +
+		vector[pair[node, score_val]] ranking() except +
 		double score(node) except +
 		double maximum() except +
 		double centralization() except +
@@ -47,20 +51,40 @@ cdef class Centrality(Algorithm):
 	def __dealloc__(self):
 		self._G = None # just to be sure the graph is deleted
 
-	def scores(self):
+	def scores(self, asarray=None):
 		"""
 		scores()
 
 		Returns the scores of all nodes for the centrality algorithm.
 
+		Parameters
+		----------
+		asarray : optional
+			Return the result as a numpy array. Default: None
+
 		Returns
 		-------
-		list(float)
+		list(float) or ndarray
 			The list of all scores.
 		"""
 		if self._this == NULL:
 			raise RuntimeError("Error, object not properly initialized")
-		return (<_Centrality*>(self._this)).scores()
+		return maybe_asarray_1d(&(<_Centrality*>(self._this)).scores(), asarray)
+
+	def compactScores(self):
+		"""
+		compactScores()
+
+		Returns the scores of all existing nodes for the centrality algorithm.
+
+		Returns
+		-------
+		list(float)
+			The list of all scores for existing nodes.
+		"""
+		if self._this == NULL:
+			raise RuntimeError("Error, object not properly initialized")
+		return (<_Centrality*>(self._this)).compactScores()
 
 	def score(self, v):
 		"""
@@ -138,6 +162,7 @@ cdef extern from "<networkit/centrality/Betweenness.hpp>":
 	cdef cppclass _Betweenness "NetworKit::Betweenness" (_Centrality):
 		_Betweenness(_Graph, bool_t, bool_t, edgeweight) except +
 		vector[double] edgeScores() except +
+		vector[double] compactEdgeScores() except +
 
 cdef class Betweenness(Centrality):
 	"""
@@ -166,8 +191,9 @@ cdef class Betweenness(Centrality):
 		"""
 		edgeScores()
 		
-		Get a vector containing the betweenness score for each edge in the graph
-		in ascending edge ID order.
+		Get a list containing the betweenness score for each edge in the graph
+		in ascending edge ID order. For the creation of this list, additional memory is
+		allocated.
 
 		Returns
 		-------
@@ -175,6 +201,21 @@ cdef class Betweenness(Centrality):
 			The betweenness scores calculated by run().
 		"""
 		return (<_Betweenness*>(self._this)).edgeScores()
+
+	def compactEdgeScores(self):
+		"""
+		compactEdgeScores()
+
+		Get a list containing the betweenness score for each existing edge in the graph
+		in ascending edge ID order. For the creation of this list, additional memory is
+		allocated.
+
+		Returns
+		-------
+		list(float)
+			The betweenness scores calculated by run().
+		"""
+		return (<_Betweenness*>(self._this)).compactEdgeScores()
 
 cdef extern from "<networkit/centrality/ApproxBetweenness.hpp>":
 
@@ -717,14 +758,23 @@ cdef class Closeness(Centrality):
 		is automatically set to False.
 	"""
 
-	def __cinit__(self, Graph G, normalized, third):
+	def __cinit__(self, Graph G, normalized, checkConnectedness=None, variant=None):
 		self._G = G
-		if isinstance(third, int):
-			self._this = new _Closeness(G._this, normalized, <_ClosenessVariant> third)
-		elif isinstance(third, bool):
-			self._this = new _Closeness(G._this, normalized, <bool_t> third)
+
+		if checkConnectedness is not None and variant is not None:
+			raise TypeError("Use either checkConnectedness or variant, not both")
+
+		arg = variant if variant is not None else checkConnectedness
+
+		if arg is None:
+			raise TypeError("Missing third argument: use either checkConnectedness or variant")
+
+		if isinstance(arg, bool):
+			self._this = new _Closeness(G._this, normalized, <bool_t> arg)
+		elif isinstance(arg, int):
+			self._this = new _Closeness(G._this, normalized, <_ClosenessVariant> arg)
 		else:
-			raise Exception("Error: the third parameter must be either a bool or a ClosenessVariant")
+			raise TypeError("Expected checkConnectedness to be a bool or variant to be a ClosenessVariant")
 
 cdef extern from "<networkit/centrality/ApproxCloseness.hpp>" namespace "NetworKit::ApproxCloseness":
 
@@ -2779,7 +2829,7 @@ class SpectralCentrality:
 
 		Not implemented yet.
 		"""
-		raise NotImplemented
+		raise NotImplementedError
 
 	def normFactor(self):
 		""" 
@@ -2787,7 +2837,7 @@ class SpectralCentrality:
 
 		Not implemented yet.
 		"""
-		raise NotImplemented
+		raise NotImplementedError
 
 	def run(self):
 		""" 

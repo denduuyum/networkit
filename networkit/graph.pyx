@@ -452,52 +452,90 @@ cdef class Graph:
 			Check if edge is already present in the graph. If detected, do not insert the edge. Default: False
 		"""
 
-		cdef cnp.ndarray[cnp.npy_intp, ndim = 1, mode = 'c'] row, col
-		cdef cnp.ndarray[cnp.npy_double, ndim = 1, mode = 'c'] data
+		cdef cnp.ndarray[cnp.npy_uintp, ndim = 1, mode = 'c'] row_u_pt, col_u_pt
+		cdef cnp.ndarray[cnp.npy_uint32, ndim = 1, mode = 'c'] row_u_32t, col_u_32t
+		cdef cnp.ndarray[cnp.npy_uint16, ndim = 1, mode = 'c'] row_u_16t, col_u_16t
+		cdef cnp.ndarray[cnp.npy_uint8, ndim = 1, mode = 'c'] row_u_8t, col_u_8t
+
+		cdef cnp.ndarray[cnp.npy_intp, ndim = 1, mode = 'c'] row_pt, col_pt
 		cdef cnp.ndarray[cnp.npy_int32, ndim = 1, mode = 'c'] row_32t, col_32t
+		cdef cnp.ndarray[cnp.npy_int16, ndim = 1, mode = 'c'] row_16t, col_16t
+		cdef cnp.ndarray[cnp.npy_int8, ndim = 1, mode = 'c'] row_8t, col_8t
+
+		cdef cnp.ndarray[cnp.npy_float64, ndim = 1, mode = 'c'] data_pt
+		cdef cnp.ndarray[cnp.npy_float32, ndim = 1, mode = 'c'] data_32t
+
+		def dtyped_row_col(row, col):
+			if row.dtype != col.dtype:
+				raise TypeError("Row and column indices must have the same data type.")
+			if row.dtype == np.uintp:
+				row_u_pt = row.view(np.uintp)
+				col_u_pt = col.view(np.uintp)
+				return row_u_pt, col_u_pt
+			if row.dtype == np.uint32:
+				row_u_32t = row.view(np.uint32)
+				col_u_32t = col.view(np.uint32)
+				return row_u_32t, col_u_32t
+			if row.dtype == np.uint16:
+				row_u_16t = row.view(np.uint16)
+				col_u_16t = col.view(np.uint16)
+				return row_u_16t, col_u_16t
+			if row.dtype == np.uint8:
+				row_u_8t = row.view(np.uint8)
+				col_u_8t = col.view(np.uint8)
+				return row_u_8t, col_u_8t
+			if row.dtype == np.intp:
+				row_pt = row.view(np.intp)
+				col_pt = col.view(np.intp)
+				return row_pt, col_pt
+			if row.dtype == np.int32:
+				row_32t = row.view(np.int32)
+				col_32t = col.view(np.int32)
+				return row_32t, col_32t
+			if row.dtype == np.int16:
+				row_16t = row.view(np.int16)
+				col_16t = col.view(np.int16)
+				return row_16t, col_16t
+			if row.dtype == np.int8:
+				row_8t = row.view(np.int8)
+				col_8t = col.view(np.int8)
+				return row_8t, col_8t
+			raise TypeError("Unsupported data type for row and column indices. Supported types are np.intp, np.int32, np.int16, and np.int8.")
+
+		def dtyped_data(data):
+			if data.dtype == np.float64:
+				data_pt = data.view(np.float64)
+				return data_pt
+			if data.dtype == np.float32:
+				data_32t = data.view(np.float32)
+				return data_32t
+			raise TypeError("Unsupported data type for edge weights. Supported types are np.float32 and np.float64.")
 
 		if isinstance(inputData, coo_matrix):
 			try:
-				if inputData.row.dtype == np.int32:
-					row_32t = inputData.row.view(np.int32)
-					col_32t = inputData.col.view(np.int32)
-					data = np.ones(len(row_32t), dtype = np.double)
-					if addMissing:	
-						for i in range(len(inputData.row)):
-							# Calling Python interface of addEdge due to addMissing support. 
-							self.addEdge(row_32t[i], col_32t[i], data[i], addMissing, checkMultiEdge)
-					else:	
-						for i in range(len(inputData.row)):
-							# Calling Cython interface of addEdge directly for higher performance. 
-							self._this.addEdge(row_32t[i], col_32t[i], data[i], checkMultiEdge)
-				else:
-					row = inputData.row.view(np.intp)
-					col = inputData.col.view(np.intp)
-					data = np.ones(len(row), dtype = np.double)
-					if addMissing:	
-						for i in range(len(inputData.row)):
-							# Calling Python interface of addEdge due to addMissing support. 
-							self.addEdge(row[i], col[i], data[i], addMissing, checkMultiEdge)
-					else:	
-						for i in range(len(inputData.row)):
-							# Calling Cython interface of addEdge directly for higher performance. 
-							self._this.addEdge(row[i], col[i], data[i], checkMultiEdge)
-				
+				row, col = dtyped_row_col(inputData.row, inputData.col)
+				data = np.asarray(inputData.data, dtype=np.double, order='C')
+				if addMissing:	
+					for i in range(len(inputData.row)):
+						# Calling Python interface of addEdge due to addMissing support. 
+						self.addEdge(row[i], col[i], data[i], addMissing, checkMultiEdge)
+				else:	
+					for i in range(len(inputData.row)):
+						# Calling Cython interface of addEdge directly for higher performance. 
+						self._this.addEdge(row[i], col[i], data[i], checkMultiEdge)
 			except (TypeError, ValueError) as e:
 				raise TypeError('invalid input format') from e
 
 		elif isinstance(inputData, tuple) and len(inputData) == 2:
 			if isinstance(inputData[1], tuple):
 				try:
-					row = inputData[1][0].view(np.intp)
-					col = inputData[1][1].view(np.intp)
-					data = inputData[0].view(dtype = np.double)
+					row, col = dtyped_row_col(inputData[1][0], inputData[1][1])
+					data = dtyped_data(inputData[0])
 				except (TypeError, ValueError) as e:
 					raise TypeError('invalid input format') from e
 			else:
 				try:
-					row = inputData[0].view(np.intp)
-					col = inputData[1].view(np.intp)
+					row, col = dtyped_row_col(inputData[0], inputData[1])
 					data = np.ones(len(row), dtype = np.double)
 				except (TypeError, ValueError) as e:
 					raise TypeError('invalid input format') from e
@@ -766,6 +804,9 @@ cdef class Graph:
 			Any callable object that takes the parameter tuple(int, int, float, int).
 			Parameter list refering to (node id, node id, edge weight, edge id).
 		"""
+		if not self._this.hasNode(u):
+			raise RuntimeError("Cannot iterate over edges of non-existing node {}".format(u))
+
 		cdef EdgeCallBackWrapper* wrapper
 		try:
 			wrapper = new EdgeCallBackWrapper(callback)
@@ -790,6 +831,9 @@ cdef class Graph:
 			Any callable object that takes the parameter tuple(int, int, float, int).
 			Parameter list refering to (node id, node id, edge weight, edge id).
 		"""
+		if not self._this.hasNode(u):
+			raise RuntimeError("Cannot iterate over in-edges of non-existing node {}".format(u))
+
 		cdef EdgeCallBackWrapper* wrapper
 		try:
 			wrapper = new EdgeCallBackWrapper(callback)
@@ -1179,6 +1223,64 @@ cdef class Graph:
 			raise Exception("Attribute name has to be a string")
 		self._this.detachEdgeAttribute(stdstring(name))
 
+
+def GraphFromCsr(csr, directed=True, weighted=False):
+	"""Create a Graph from a SciPy CSR matrix.
+
+	Parameters
+	----------
+	csr : scipy.sparse.csr_matrix
+		The SciPy CSR matrix representing the adjacency matrix.
+	directed : bool, optional
+		Whether to treat the matrix as directed. Default: True
+	weighted : bool, optional
+		Whether to treat the matrix as weighted. Default: False
+
+	Returns
+	-------
+	Graph
+		A new NetworKit Graph built from the CSR matrix.
+	"""
+	# Validate input
+	try:
+		indptr = np.asarray(csr.indptr, dtype=np.int64)
+		indices = np.asarray(csr.indices, dtype=np.int64)
+		data = np.asarray(csr.data, dtype=np.double)
+	except Exception:
+		raise TypeError("Expected a SciPy CSR matrix with attributes .indptr, .indices, .data")
+
+	cdef count nRows = <count>csr.shape[0]
+	cdef count nCols = <count>csr.shape[1]
+
+	# Use raw buffer pointers and call the fast C++ entrypoint to avoid python loops
+	cdef cnp.ndarray indptr_arr = indptr
+	cdef cnp.ndarray indices_arr = indices
+	cdef cnp.ndarray data_arr = data
+
+	# Ensure arrays are contiguous C order
+	indptr_arr = np.ascontiguousarray(indptr_arr, dtype=np.int64)
+	indices_arr = np.ascontiguousarray(indices_arr, dtype=np.int64)
+	data_arr = np.ascontiguousarray(data_arr, dtype=np.double)
+
+	cdef const index* indptr_ptr = <const index*> indptr_arr.data
+	cdef const index* indices_ptr = <const index*> indices_arr.data
+	cdef const double* data_ptr = <const double*> data_arr.data
+
+	cdef size_t indptr_size = indptr_arr.shape[0]
+	cdef size_t indices_size = indices_arr.shape[0]
+	cdef size_t data_size = data_arr.shape[0]
+
+	# _fromCSRRaw is a Cython-only helper that forwards to Graph::fromCSR via
+	# std::span; Cython cannot construct a std::span directly yet.
+	cdef _Graph tmp = _Graph._fromCSRRaw(
+				indptr_ptr, indptr_size,
+				indices_ptr, indices_size,
+				data_ptr, data_size,
+				<bool_t>directed, <bool_t>weighted)
+	cdef Graph G = Graph(nRows, weighted, directed)
+	G.setThis(tmp)
+	return G
+
 def GraphFromCoo(inputData, n=0, bool_t weighted=False, bool_t directed=False, bool_t edgesIndexed=False):
 	"""
 	graphFromInputData(inputData, n=0, bool_t weighted=False, bool_t directed=False, bool_t edgesIndexed=False):
@@ -1191,7 +1293,7 @@ def GraphFromCoo(inputData, n=0, bool_t weighted=False, bool_t directed=False, b
 
 	Parameter :code:`inputData` can be one of the following:
 
-	- scipy.sparse.coo_matrix
+	- scipy.sparse.coo_matrix, where the `scipy.sparse.coo_matrix.data` become the weights
 	- (data, (i,j)) where data, i and j are of type np.ndarray
 	- (i,j) where i and j are of type np.ndarray
 
@@ -1401,6 +1503,10 @@ class NodeAttribute:
 		return self.attr[node]
 
 	def __setitem__(self, node, value):
+		# Accept int for float attributes, convert to float
+		if self.type is float and isinstance(value, int):
+			value = float(value)
+
 		if not isinstance(value, self.type):
 			raise Exception("Wrong Attribute type")
 		self.attr[node] = value

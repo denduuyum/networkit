@@ -27,6 +27,7 @@
     <a href="https://badge.fury.io/py/networkit"><img src="https://badge.fury.io/py/networkit.svg"></a>
     <a href="https://coveralls.io/github/networkit/networkit?branch=master"><img src="https://coveralls.io/repos/github/networkit/networkit/badge.svg?branch=master"></a>
     <a href="https://mybinder.org/v2/gh/networkit/networkit/master?urlpath=lab/tree/notebooks/User-Guide.ipynb"><img src="https://mybinder.org/badge_logo.svg"></a>
+    <a href="https://anaconda.org/networkit-nightly/networkit-nightly/files"><img src="./docs/badge/nightly.svg">
   </p>
 </div>
 
@@ -88,7 +89,7 @@ As both a production tool and a research testbed for algorithm engineering, Netw
 
 #### Python Module
 
-**For most users**, NetworKit can be installed directly via package managers with no additional requirements other than Python 3.9+.
+**For most users**, NetworKit can be installed directly via package managers with no additional requirements other than Python 3.10+.
 
 | Package Manager | Command |
 |-----------------|---------|
@@ -108,6 +109,16 @@ If you only need the C++ core without Python bindings:
 | **spack** | `spack install libnetworkit` |
 
 More platform-specific installation instructions can be found in our [getting started guide](https://networkit.github.io/get_started.html).
+
+#### Nightly builds
+
+If you are interested in the most recent build of NetworKit, you can use the nightly channel [networkit-nightly](https://anaconda.org/networkit-nightly/networkit-nightly) on anaconda.org.
+Published packages are based on pushes to the `master`-branch, and the channel keeps the five most recent ones.
+
+| Package Manager | Command |
+|-----------------|---------|
+| **pip** | `pip install --upgrade --extra-index-url https://pypi.anaconda.org/networkit-nightly/simple networkit-nightly` |
+
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -182,9 +193,9 @@ For comprehensive examples and tutorials, explore our [interactive notebooks][no
 
 Building from source requires:
 
-- **C++ Compiler**: [g++] (&gt;= 10.0), [clang++] (&gt;= 11.0), or MSVC (&gt;= 14.30)
+- **C++ Compiler**: [g++] (&gt;= 12.0), [clang++] (&gt;= 14.0), or MSVC (&gt;= 14.30)
 - **OpenMP**: For parallelism (usually included with compiler)
-- **Python**: 3.9 or higher with development libraries
+- **Python**: 3.10 or higher with development libraries
   - Debian/Ubuntu: `apt-get install python3-dev`
   - RHEL/CentOS: `dnf install python3-devel`
   - Windows: [Official installer](https://www.python.org/downloads/windows/)

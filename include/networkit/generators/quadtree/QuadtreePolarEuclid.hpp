@@ -9,7 +9,6 @@
 #define NETWORKIT_GENERATORS_QUADTREE_QUADTREE_POLAR_EUCLID_HPP_
 
 #include <cmath>
-#include <memory>
 #include <omp.h>
 #include <vector>
 
@@ -124,7 +123,9 @@ public:
 #pragma omp parallel
         {
 #pragma omp single nowait
-            { root.reindex(0); }
+            {
+                root.reindex(0);
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 name = "networkit"
 
-version = "11.2.1"
+version = "11.3"
 
 url = "https://networkit.github.io/"
 
@@ -29,6 +29,8 @@ research, especially in the area of community detection."""
 keywords = ["graph algorithm", "network analysis", "social network"]
 
 platforms = "any"
+
+python_requires = ">=3.10"
 
 classifiers = [
     "Development Status :: 5 - Production/Stable",

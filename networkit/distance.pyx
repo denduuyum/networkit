@@ -1825,3 +1825,137 @@ cdef class DynPrunedLandmarkLabeling(Algorithm, DynAlgorithm):
 			The shortest-path distances from the source node to the target node.
 		"""
 		return (<_DynPrunedLandmarkLabeling*>(self._this)).query(u, v)
+
+cdef extern from "<networkit/distance/FloydWarshall.hpp>":
+	cdef cppclass _FloydWarshall "NetworKit::FloydWarshall"(_Algorithm):
+		_FloydWarshall(_Graph G) except +
+		void run() except +
+		edgeweight getDistance(node source, node target) except +
+		bint isNodeInNegativeCycle(node u) except +
+		vector[node] getNodesOnShortestPath(node source, node target) except +
+		vector[vector[edgeweight]] &getDistances() except +
+
+cdef class FloydWarshall(Algorithm):
+	"""
+	FloydWarshall(G)
+	Computes all-pairs shortest paths using the Floyd–Warshall algorithm.
+	This algorithm finds the shortest paths between all node pairs in a weighted graph
+	(directed or undirected). It correctly handles negative edge weights and can detect
+	nodes that lie on negative cycles.
+
+	Parameters
+	----------
+	G : networkit.Graph
+	Weighted input graph. May be directed or undirected.
+
+	Notes
+	-----
+	The algorithm runs in O(n^3) time and is mainly suitable for small to
+	medium-sized graphs.
+	"""
+
+	cdef Graph _G
+
+	def __cinit__(self, Graph G):
+		# Keep a reference so the Graph outlives the C++ algorithm object
+		self._G = G
+		self._this = new _FloydWarshall(G._this)
+
+	def __dealloc__(self):
+		# Drop reference; actual Graph lifetime is managed elsewhere
+		self._G = None
+
+	def run(self):
+		"""
+		run()
+
+		Execute the Floyd–Warshall algorithm and compute all-pairs shortest paths.
+		"""
+		self._this.run()
+		return self
+
+	def getDistance(self, source, target):
+		"""
+		getDistance(source, target)
+
+		Returns the shortest distance between two nodes.
+
+		If no path exists, this returns a very large sentinel value
+		(typically std::numeric_limits<edgeweight>::max()).
+
+		Parameters
+		----------
+		source : int
+			Source node.
+		target : int
+			Target node.
+
+		Returns
+		-------
+		float
+			Distance from source to target.
+		"""
+		return (<_FloydWarshall *> self._this).getDistance(source, target)
+
+	def isNodeInNegativeCycle(self, u):
+		"""
+		isNodeInNegativeCycle(u)
+
+		Check whether a node is part of a negative cycle.
+
+		Parameters
+		----------
+		u : int
+			Node to check.
+
+		Returns
+		-------
+		bool
+			True if u lies on a negative cycle, False otherwise.
+		"""
+		return (<_FloydWarshall *> self._this).isNodeInNegativeCycle(u)
+
+	def getDistances(self, asarray=None):
+		"""
+		getDistances(asarray=None)
+
+		Returns the full all-pairs distance matrix.
+
+		Note: the returned matrix is a reference to internal storage.
+		Do not modify it directly; call run() again if the graph changes.
+
+		Parameters
+		----------
+		asarray : optional
+			Return the result as a numpy array. Default: Falsy.
+
+		Returns
+		-------
+		list(list(float)) or np.ndarray
+			distances[u][v] is the shortest path distance from u to v.
+		"""
+		return maybe_asarray_2d(&(<_FloydWarshall*>(self._this)).getDistances(), asarray)
+
+	def getNodesOnShortestPath(self, source, target):
+		"""
+		getNodesOnShortestPath(source, target)
+
+		Returns the nodes on one shortest path from source to target.
+
+		If multiple shortest paths exist with the same total distance,
+		the path with the fewest nodes is returned. If no path exists,
+		an empty list is returned.
+
+		Parameters
+		----------
+		source : int
+			Source node.
+		target : int
+			Target node.
+
+		Returns
+		-------
+		list(int)
+			Sequence of nodes forming the path from source to target.
+		"""
+		return (<_FloydWarshall *> self._this).getNodesOnShortestPath(source, target)

@@ -152,6 +152,7 @@ class TestGraphIO(unittest.TestCase):
             ("foodweb-baydry.konect", nk.Format.KONECT),
             ("foodweb-baydry.nkbg002", nk.Format.NetworkitBinary),
             ("foodweb-baydry.nkbg003", nk.Format.NetworkitBinary),
+            ("foodweb-baydry.nkbg004", nk.Format.NetworkitBinary),
             ("jazz2_directed.gml", nk.Format.GML),
             ("chesapeake.mtx", nk.Format.MatrixMarket),
             ("tiny_05.rb", nk.Format.RB),
@@ -160,6 +161,23 @@ class TestGraphIO(unittest.TestCase):
         for file, expected_result in instances:
             guess = nk.graphio.guessFileFormat(f"input/{file}")
             self.assertEqual(guess, expected_result)
+
+    def testReadGraphGuessCustomEdgeListOptions(self):
+        filename = "output/testReadGraphGuessCustomEdgeListOptions.edgelist"
+        with open(filename, "w") as f:
+            f.write("# comment\n1,2\n2,3\n")
+
+        graph = nk.graphio.readGraph(
+            filename,
+            separator=",",
+            firstNode=1,
+            continuous=True,
+            directed=True,
+        )
+
+        self.assertTrue(graph.isDirected())
+        self.assertTrue(graph.hasEdge(0, 1))
+        self.assertTrue(graph.hasEdge(1, 2))
 
     def testGuessFormatInputGraphs(self):
         # this test does not check the guess result;
@@ -192,10 +210,16 @@ class TestGraphIO(unittest.TestCase):
         )
         with open(output_filepath, "rb") as f:
             nkmagicbits = f.read(7)
-            self.assertEqual(
-                nkmagicbits, bytes([0x6E, 0x6B, 0x62, 0x67, 0x30, 0x30, 0x33])
-            )
+            self.assertEqual(nkmagicbits, b"nkbg004")
 
+        nk.graphio.writeGraph(
+            nk.graphio.readGraph("input/foodweb-baydry.nkbg003"),
+            output_filepath,
+            nk.Format.NetworkitBinary,
+        )
+        with open(output_filepath, "rb") as f:
+            nkmagicbits = f.read(7)
+            self.assertEqual(nkmagicbits, b"nkbg004")
 
 if __name__ == "__main__":
     unittest.main()

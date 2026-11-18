@@ -168,6 +168,12 @@ cdef class NetworkitBinaryReader(GraphReader):
 	This Reader can read files that are written with format version 2 and 3.
 	Format version 3 was released with Networkit 9.1 (December 2021).
 	Further information can be found here: https://github.com/networkit/networkit/blob/master/networkit/cpp/io/NetworkitBinaryGraph.md
+
+	Note
+	----
+	A new version 4 is slated for an upcoming release (time of statement: February 2026). This version supports writing/reading 
+	graphs with deleted nodes. As with version 3, all networks written with the new code are automatically upgraded to the newest version 4.
+	If you want to use v4 right away, you can use nightly builds (see Readme on github).
 	"""
 
 	def __cinit__(self):
@@ -202,6 +208,12 @@ cdef class NetworkitBinaryWriter(GraphWriter):
 	Since Networkit 9.1 (December 2021), the writer always writes files using format version 3.
 	Reading a binary file with version < 3 and re-writing it, implicitly upgrades the format to the current version.
 	Further information can be found here: https://github.com/networkit/networkit/blob/master/networkit/cpp/io/NetworkitBinaryGraph.md
+
+	Note
+	----
+	A new version 4 is slated for an upcoming release (time of statement: February 2026). This version supports writing/reading 
+	graphs with deleted nodes. As with version 3, all networks written with the new code are automatically upgraded to the newest version 4.
+	If you want to use v4 right away, you can use nightly builds (see Readme on github).
 	"""
 	def __cinit__(self):
 		self._this = new _NetworkitBinaryWriter()
@@ -1104,40 +1116,37 @@ def getReader(fileformat, *kargs, **kwargs):
 	`**kwargs` : dict()
 		Additional input parameter (depending on the file format).
 	"""
-	#define your [edgelist] reader here:
-	readers = {
-		Format.METIS:			METISGraphReader(),
-		Format.GraphML:			GraphMLReader(),
-		Format.GEXF:			GEXFReader(),
-		Format.SNAP:			SNAPGraphReader(),
-		Format.EdgeListCommaOne:	EdgeListReader(',',1,),
-		Format.EdgeListSpaceOne:	EdgeListReader(' ',1),
-		Format.EdgeListSpaceZero:	EdgeListReader(' ',0),
-		Format.EdgeListTabOne:		EdgeListReader('\t',1),
-		Format.EdgeListTabZero:		EdgeListReader('\t',0),
-		Format.LFR:			EdgeListReader('\t',1),
-		Format.KONECT:			KONECTGraphReader(),
-		Format.GML:			GMLGraphReader(),
-		Format.GraphToolBinary:		GraphToolBinaryReader(),
-		Format.MAT:			MatReader(),
-		Format.ThrillBinary:		ThrillGraphBinaryReader(),
-		Format.NetworkitBinary:         NetworkitBinaryReader(),
-		Format.MatrixMarket: MTXGraphReader(),
-		Format.RB: RBGraphReader(),
-	}
 
 	# special case for custom Edge Lists
 	if fileformat == Format.EdgeList:
 		if "continuous" in kwargs and kwargs["continuous"] == False:
 			kwargs["firstNode"] = 0
-		reader = EdgeListReader(*kargs, **kwargs)
+		return EdgeListReader(*kargs, **kwargs)
 
-	else:
-		if fileformat not in readers:
-			raise Exception("unrecognized format/format not supported as input: {0}".format(fileformat))
-		reader = readers[fileformat]#(**kwargs)
+	readers = {
+		Format.METIS:			lambda: METISGraphReader(),
+		Format.GraphML:			lambda: GraphMLReader(),
+		Format.GEXF:			lambda: GEXFReader(),
+		Format.SNAP:			lambda: SNAPGraphReader(),
+		Format.EdgeListCommaOne:	lambda: EdgeListReader(',',1,*kargs,**kwargs),
+		Format.EdgeListSpaceOne:	lambda: EdgeListReader(' ',1,*kargs,**kwargs),
+		Format.EdgeListSpaceZero:	lambda: EdgeListReader(' ',0,*kargs,**kwargs),
+		Format.EdgeListTabOne:		lambda: EdgeListReader('\t',1,*kargs,**kwargs),
+		Format.EdgeListTabZero:		lambda: EdgeListReader('\t',0,*kargs,**kwargs),
+		Format.LFR:			lambda: EdgeListReader('\t',1),
+		Format.KONECT:			lambda: KONECTGraphReader(),
+		Format.GML:			lambda: GMLGraphReader(),
+		Format.GraphToolBinary:		lambda: GraphToolBinaryReader(),
+		Format.MAT:			lambda: MatReader(),
+		Format.ThrillBinary:		lambda: ThrillGraphBinaryReader(),
+		Format.NetworkitBinary:         lambda: NetworkitBinaryReader(),
+		Format.MatrixMarket: lambda: MTXGraphReader(),
+		Format.RB: lambda: RBGraphReader(),
+	}
 
-	return reader
+	if fileformat not in readers:
+		raise Exception("unrecognized format/format not supported as input: {0}".format(fileformat))
+	return readers[fileformat]()
 
 def guessFileFormat(filepath: str) -> Format:
 	"""
@@ -1167,6 +1176,8 @@ def guessFileFormat(filepath: str) -> Format:
 			return Format.NetworkitBinary	# NetworkitBinary version 2 - binary. starts with 6E 6B 62 67 30 30 32
 		if nkmagicbits == bytes([0x6e, 0x6b, 0x62, 0x67, 0x30, 0x30, 0x33]): 
 			return Format.NetworkitBinary	# NetworkitBinary version 3 - binary. starts with 6E 6B 62 67 30 30 33
+		if nkmagicbits == bytes([0x6e, 0x6b, 0x62, 0x67, 0x30, 0x30, 0x34]):
+			return Format.NetworkitBinary  # NetworkitBinary version 4 - binary. starts with 6E 6B 62 67 30 30 34
 
 	# otherwise, open as text file and check the first lines for structured text formats
 	with open(filepath, 'r') as f:
@@ -1334,6 +1345,16 @@ def readGraph(path, fileformat=None, *kargs, **kwargs):
 	else:
 		if not fileformat:
 			fileformat = guessFileFormat(path)
+			edgeListFormats = (
+				Format.EdgeListCommaOne,
+				Format.EdgeListSpaceOne,
+				Format.EdgeListSpaceZero,
+				Format.EdgeListTabOne,
+				Format.EdgeListTabZero,
+			)
+			edgeListOptions = ("separator", "firstNode")
+			if fileformat in edgeListFormats and (kargs or any(option in kwargs for option in edgeListOptions)):
+				fileformat = Format.EdgeList
 		reader = getReader(fileformat, *kargs, **kwargs)
 
 		with open(path, "r") as file:    # catch a wrong path before it crashes the interpreter
