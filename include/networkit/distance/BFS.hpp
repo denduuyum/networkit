@@ -94,7 +94,7 @@ void BreadthFirstSearch<GraphT>::run() {
         this->G->forNeighborsOf(u, [&](NodeT v) {
             if (this->distances[v] == infDist) {
 		this->distances[v] = this->distances[u] + weightOne;
-		if (this->distances[v] < __k_dist)
+		if (this->distances[v] < this->__k_dist)
 		    q.push(v);
                 
                 this->sumDist += this->distances[v];
