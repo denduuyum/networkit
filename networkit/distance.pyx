@@ -166,6 +166,7 @@ cdef extern from "<networkit/distance/SSSP.hpp>":
 		vector[node] getPath(node t, bool_t forward) except +
 		set[vector[node]] getPaths(node t, bool_t forward) except +
 		vector[node] getNodesSortedByDistance() except +
+		count getReachableNodes() except + 
 		double _numberOfPaths(node t) except +
 		void setSource(node s) except +
 		void setTarget(node t) except +
@@ -279,6 +280,7 @@ cdef class SSSP(Algorithm):
 		-------
 			All shortest paths from source node to target node t.
 		"""
+		
 		cdef set[vector[node]] paths = (<_SSSP*>(self._this)).getPaths(t, forward)
 		result = []
 		for elem in paths:
@@ -300,6 +302,19 @@ cdef class SSSP(Algorithm):
 			Nodes ordered in increasing distance from the source.
 		"""
 		return (<_SSSP*>(self._this)).getNodesSortedByDistance()
+
+	def getReachableNodes(self):
+		"""
+		getReachableNodes()
+
+		Returns the number of nodes reached from the sourcet.
+
+		Returns
+		-------
+		int
+			Number of nodes reached by the source.
+		"""
+		return (<_SSSP*>(self._this)).getReachableNodes()
 
 	def numberOfPaths(self, t):
 		"""

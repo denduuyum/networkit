@@ -78,14 +78,16 @@ void BreadthFirstSearch<GraphT>::run() {
     q.push(this->source);
     this->distances[this->source] = EdgeWeightT{0};
 
+    if (this->storeNodesSortedByDistance) {
+            this->nodesSortedByDistance.push_back(this->source);
+    }
+
+
     bool breakWhenFound = (this->target != nullNodeId);
     do {
         NodeT u = q.front();
         q.pop();
 
-        if (this->storeNodesSortedByDistance) {
-            this->nodesSortedByDistance.push_back(u);
-        }
         if (breakWhenFound && this->target == u) {
             break;
         }
@@ -96,6 +98,9 @@ void BreadthFirstSearch<GraphT>::run() {
 		this->distances[v] = this->distances[u] + weightOne;
 		if (this->distances[v] < this->__k_dist)
 		    q.push(v);
+		if (this->storeNodesSortedByDistance) {
+			this->nodesSortedByDistance.push_back(v);
+		}
                 
                 this->sumDist += this->distances[v];
                 ++this->reachedNodes;
